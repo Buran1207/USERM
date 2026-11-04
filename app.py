@@ -7,8 +7,6 @@ or order placement. Every signal uses completed daily bars only.
 from __future__ import annotations
 from datetime import date
 from pathlib import Path
-import os
-import hmac
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -24,30 +22,6 @@ from userm.ui import CSS,tt,fmt_pct,figstyle,rotation_map,price_chart,table_down
 st.set_page_config(page_title="USERM | US ETF Rotation Monitor",page_icon="📈",layout="wide",initial_sidebar_state="expanded")
 st.markdown(CSS,unsafe_allow_html=True)
 
-# Cloud safety gate. A private GitHub repository is not a promise of private web access.
-# For a non-local Streamlit browser URL, fail closed unless USERM_VIEWER_PASSWORD exists.
-try:
-    _url = st.context.url or ''
-except Exception:
-    _url = ''
-_is_local = not _url or _url.startswith(('http://localhost:', 'http://127.0.0.1:','http://0.0.0.0:'))
-try:
-    _pass = str(st.secrets.get('USERM_VIEWER_PASSWORD', '')).strip()
-except Exception:
-    _pass = os.environ.get('USERM_VIEWER_PASSWORD', '').strip()
-if not _is_local and not _pass:
-    st.error('云端网页尚未配置访问密码 USERM_VIEWER_PASSWORD。为避免公开散布授权行情，已停止加载数据。')
-    st.stop()
-if _pass and not st.session_state.get('userm_authorized',False):
-    st.title('USERM · Restricted Research')
-    _entered=st.text_input('请输入访问密码 / Enter access password', type='password')
-    if st.button('进入研究平台 / Sign in'):
-        if hmac.compare_digest(_entered,_pass):
-            st.session_state['userm_authorized']=True
-            st.rerun()
-        else:
-            st.error('密码不正确 / Incorrect password')
-    st.stop()
 
 @st.cache_data(show_spinner=False)
 def cached_signals():
