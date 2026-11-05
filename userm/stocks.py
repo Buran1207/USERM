@@ -7,8 +7,13 @@ import pandas as pd
 from .config import CONFIG
 
 
-def alpha_table(stocks:pd.DataFrame, etf_signals:pd.DataFrame, holdings:pd.DataFrame, asof, calendar:pd.DatetimeIndex):
+def alpha_table(stocks:pd.DataFrame, etf_signals:pd.DataFrame, holdings:pd.DataFrame, asof, calendar:pd.DatetimeIndex, observation_days:int=20):
     asof=pd.Timestamp(asof)
+    observation_days=int(observation_days)
+    if not 1 <= observation_days <= 60:
+        raise ValueError("Observation sessions must be between 1 and 60")
+    sessions=pd.DatetimeIndex(calendar)
+    sessions=sessions[sessions<=asof]
     h=holdings.copy()
     h=h[h.symbol.notna() & (h.symbol.astype(str).str.strip()!='')]
     relevant=set(h.symbol)
@@ -19,11 +24,22 @@ def alpha_table(stocks:pd.DataFrame, etf_signals:pd.DataFrame, holdings:pd.DataF
     out=[]
     for (e,code),g in m.groupby(['etf','symbol'],sort=False):
         g=g.sort_values('date').copy()
-        # If a stock has missing days, returns must not silently cover a longer span.
-        for n in [5,20,60]:
-            g[f'stock_ret_{n}']=g.close_stock/g.close_stock.shift(n)-1
-            g[f'etf_ret_{n}']=g.close_etf/g.close_etf.shift(n)-1
-            g[f'alpha_{n}']=g[f'stock_ret_{n}']-g[f'etf_ret_{n}']
+        # Align stock and ETF to the SAME observed market calendar.
+        # A window with any missing daily bar is invalid, not a longer-period
+        # return masquerading as a 5/20/60-day observation.
+        aligned=g.set_index('date').reindex(sessions)
+        observed=aligned.close_stock.notna() & aligned.close_etf.notna()
+        for n in sorted({5,20,60,observation_days}):
+            complete=observed.rolling(n+1,min_periods=n+1).sum().eq(n+1)
+            sr=(aligned.close_stock/aligned.close_stock.shift(n)-1).where(complete)
+            er=(aligned.close_etf/aligned.close_etf.shift(n)-1).where(complete)
+            suffix=str(n) if n in (5,20,60) else 'obs'
+            g[f'stock_ret_{suffix}']=g.date.map(sr)
+            g[f'etf_ret_{suffix}']=g.date.map(er)
+            g[f'alpha_{suffix}']=g[f'stock_ret_{suffix}']-g[f'etf_ret_{suffix}']
+        if observation_days in (5,20,60):
+            for prefix in ('stock_ret','etf_ret','alpha'):
+                g[f'{prefix}_obs']=g[f'{prefix}_{observation_days}']
         g['stock_ma10']=g.close_stock.rolling(10,min_periods=10).mean()
         g['stock_ma20']=g.close_stock.rolling(20,min_periods=20).mean()
         g['stock_ma50']=g.close_stock.rolling(50,min_periods=50).mean()
@@ -52,4 +68,5 @@ def alpha_table(stocks:pd.DataFrame, etf_signals:pd.DataFrame, holdings:pd.DataF
     ranked['alpha_strength']=0.45*ranked['alpha_20']+0.35*ranked['alpha_5']+0.20*ranked['alpha_60']
     # Rescale simply to percentage points, not advertised as predicted return.
     ranked['alpha_strength_pp']=100*ranked['alpha_strength']
-    return ranked.sort_values(['fresh','alpha_strength'],ascending=[False,False],na_position='last')
+    ranked['obs_alpha_rank']=ranked.groupby('etf')['alpha_obs'].rank(ascending=False,method='min')
+    return ranked.sort_values(['fresh','alpha_obs','alpha_strength'],ascending=[False,False,False],na_position='last')

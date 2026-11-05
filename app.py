@@ -16,12 +16,12 @@ from userm.config import STAGES,QUADRANTS,STAGE_COLORS,DATA
 from userm.data import load_quotes,load_etf_master,load_holdings,manifest,table
 from userm.signals import calculate_etf_signals,latest_table
 from userm.stocks import alpha_table
+from userm.observation import add_etf_observation
 from userm.validation import event_study,event_summary
 from userm.ui import CSS,tt,fmt_pct,figstyle,rotation_map,price_chart,table_download,tradingview_url
 
 st.set_page_config(page_title="USERM | US ETF Rotation Monitor",page_icon="📈",layout="wide",initial_sidebar_state="expanded")
 st.markdown(CSS,unsafe_allow_html=True)
-
 
 @st.cache_data(show_spinner=False)
 def cached_signals():
@@ -60,10 +60,12 @@ except Exception as exc:
 cal=pd.DatetimeIndex(sorted(signals.date.unique()))
 latest=cal.max()
 manifest_info=manifest()
-stock_latest=pd.Timestamp(manifest_info.get('stocks',{}).get('max_date','1900-01-01'))
+stock_latest=pd.to_datetime(manifest_info.get('stocks',{}).get('max_date'),errors='coerce')
+if pd.isna(stock_latest):
+    stock_latest=pd.Timestamp('1900-01-01')
 
 with st.sidebar:
-    st.markdown('<span style="color:#b98d8f;font-size:12px;letter-spacing:2px;font-weight:800">USERM · V1.0</span>',unsafe_allow_html=True)
+    st.markdown('<span style="color:#b98d8f;font-size:12px;letter-spacing:2px;font-weight:800">USERM · V1.1</span>',unsafe_allow_html=True)
     st.markdown('### US EQUITY ROTATION')
     lang=st.selectbox('Language / 语言',['中文','English'],index=0)
     EN=lang=='English'
@@ -73,18 +75,19 @@ with st.sidebar:
     chosen=pd.Timestamp(requested)
     asof=cal[cal<=chosen].max()
     if asof != chosen: st.caption(f'已回退至最近ETF交易日 / Effective session: {asof.date()}')
+    observation_days=st.slider('观察周期 / Observation (trading days)',min_value=1,max_value=60,value=20,step=1,help='改变观察期收益、超额排名与个股Alpha比较；L1–L4固定规则不改变。')
     group=st.selectbox('ETF分组 / ETF family',['全部','行业','科技主题'],format_func=lambda v:tt(v,EN))
     st.caption('数据本地计算，网页只读 · No live execution or data fetching')
     st.caption(f'ETF latest: {latest.date()}')
     st.caption(f'Stock latest: {stock_latest.date()}')
 
-snap=latest_table(signals,asof,cal)
+snap=add_etf_observation(latest_table(signals,asof,cal),signals,cal,observation_days)
 if group != '全部':snap=snap[snap.group==group]
 fresh=snap[snap.fresh].copy()
 
 st.markdown('<div class="tag">USERM | US EQUITY ROTATION & REVERSAL</div>',unsafe_allow_html=True)
 st.title(tt(page,EN))
-st.caption(f"20 ETF Core Universe  ·  CPS:2 adjusted daily prices  ·  {asof:%Y-%m-%d} EOD  ·  No machine learning")
+st.caption(f"20 ETF Core Universe  ·  Observation: {observation_days} trading sessions  ·  CPS:2 adjusted prices  ·  {asof:%Y-%m-%d} EOD  ·  No ML")
 if asof==latest and (pd.Timestamp.today().normalize()-latest).days>7:
     st.warning('ETF数据距离当前日期超过7天；请先离线刷新数据。本网页不会自动取得行情。')
 
@@ -97,18 +100,18 @@ if page=='ETF市场总览':
     st.info('本页的Alpha为ETF相对同组其他ETF等权日收益基准的超额收益，并不是对标普500或纳指100的超额收益。相对强势≠必然上涨。')
     st.subheader('ETF轮动与交易研究清单')
     show_records(fresh,{'etf':'ETF','name_zh':'方向','group':'分组','stage':'信号','quadrant':'轮动象限',
-        'rotation_rank':'组内名次','rotation_score':'轮动分数','ret_5':'5日收益','rel_5':'5日超额',
-        'rel_20':'20日超额','rel_60':'60日超额','rvol_20':'量比'},
-        pct_cols=['ret_5','rel_5','rel_20','rel_60'],round_cols=['rotation_rank','rotation_score','rvol_20'],height=460)
+        'obs_rank':'观察期排名','obs_ret':f'{observation_days}日收益','obs_rel':f'{observation_days}日超额',
+        'rotation_rank':'固定轮动名次','rotation_score':'固定轮动分数','rel_5':'5日超额','rel_20':'20日超额','rvol_20':'量比'},
+        pct_cols=['obs_ret','obs_rel','rel_5','rel_20'],round_cols=['obs_rank','rotation_rank','rotation_score','rvol_20'],height=460)
     st.download_button('下载ETF当前面板 CSV',data=table_download(fresh),file_name=f'USERM_etf_panel_{asof.date()}.csv',mime='text/csv')
     left,right=st.columns([1.2,1])
     with left:
-        st.subheader('短期与中期相对表现')
-        dd=fresh.sort_values('rel_5',ascending=False).copy()
-        dd['5日超额(pp)']=100*dd.rel_5;dd['20日超额(pp)']=100*dd.rel_20
+        st.subheader(f'自选{observation_days}日超额与固定20日超额')
+        dd=fresh.sort_values('obs_rel',ascending=False).copy()
+        dd['观察期超额(pp)']=100*dd.obs_rel;dd['20日超额(pp)']=100*dd.rel_20
         fig=go.Figure()
-        fig.add_trace(go.Bar(y=dd.etf,x=dd['5日超额(pp)'],name='5D',orientation='h',marker_color='#8C1D28'))
-        fig.add_trace(go.Bar(y=dd.etf,x=dd['20日超额(pp)'],name='20D',orientation='h',marker_color='#A6B4C2'))
+        fig.add_trace(go.Bar(y=dd.etf,x=dd['观察期超额(pp)'],name=f'{observation_days}D',orientation='h',marker_color='#8C1D28'))
+        fig.add_trace(go.Bar(y=dd.etf,x=dd['20日超额(pp)'],name='20D fixed',orientation='h',marker_color='#A6B4C2'))
         fig.update_layout(barmode='group',yaxis=dict(autorange='reversed'),xaxis_title='Percentage points versus peer equal-weight basket')
         st.plotly_chart(figstyle(fig,540),use_container_width=True)
     with right:
@@ -130,12 +133,12 @@ if page=='ETF市场总览':
 elif page=='ETF轮动地图':
     st.info('RRG风格四象限：横轴为相对强度EMA(14)/EMA(36)之比，纵轴为该比值5日变化。100是中性线；这是公开定义的自有近似公式，并非JdK专有指标。')
     selected=st.multiselect('历史轨迹 / Trails',fresh.etf.tolist(),default=fresh.etf.head(2).tolist(),max_selections=4)
-    n=st.slider('轨迹长度 / Lookback sessions',5,40,15)
-    trails=signals[(signals.etf.isin(selected))&(signals.date<=asof)].groupby('etf',group_keys=False).tail(n)
+    st.caption(f'轮动轨迹显示最近{observation_days}个交易间隔（受左侧观察周期滑块控制），RRG的EMA14/36及5日动量参数保持不变。')
+    trails=signals[(signals.etf.isin(selected))&(signals.date<=asof)].groupby('etf',group_keys=False).tail(observation_days+1)
     st.plotly_chart(rotation_map(snap,trails,EN),use_container_width=True)
     st.subheader('象限与转向')
-    show_records(fresh,{'etf':'ETF','name_zh':'方向','quadrant':'象限','rs_ratio':'RS趋势','rs_momentum':'RS动量','rel_5':'5日超额','rel_20':'20日超额','stage':'信号'},
-        pct_cols=['rel_5','rel_20'],round_cols=['rs_ratio','rs_momentum'],height=460)
+    show_records(fresh,{'etf':'ETF','name_zh':'方向','quadrant':'象限','rs_ratio':'RS趋势','rs_momentum':'RS动量','obs_ret':f'{observation_days}日收益','obs_rel':f'{observation_days}日超额','stage':'信号'},
+        pct_cols=['obs_ret','obs_rel'],round_cols=['rs_ratio','rs_momentum'],height=460)
     st.caption('移动至“落后改善”不等于底部确认。L2/L3信号还要求价格及趋势条件。')
 
 elif page=='ETF反转机会':
@@ -144,9 +147,9 @@ elif page=='ETF反转机会':
     d=fresh[fresh.stage.isin(filter_stages)]
     if only_new:d=d[d.new_signal]
     show_records(d,{'etf':'ETF','name_zh':'方向','group':'组别','stage':'信号','stage_age':'本状态持续天数',
-        'rel_5':'5日超额','rel_10':'10日超额','rel_20':'20日超额',
+        'obs_rel':f'{observation_days}日超额','rel_5':'5日超额','rel_10':'10日超额','rel_20':'20日超额',
         'rs_ratio':'RS趋势','rs_momentum':'RS动量','rvol_20':'相对量比','reason':'触发解释'},
-        pct_cols=['rel_5','rel_10','rel_20'],round_cols=['rs_ratio','rs_momentum','rvol_20'],height=460)
+        pct_cols=['obs_rel','rel_5','rel_10','rel_20'],round_cols=['rs_ratio','rs_momentum','rvol_20'],height=460)
     st.download_button('导出候选清单 / Export',data=table_download(d),file_name=f'USERM_alerts_{asof.date()}.csv',mime='text/csv')
     st.subheader('信号历史与失效观察')
     codes=d.etf.tolist() if not d.empty else snap.etf.tolist()
@@ -158,7 +161,10 @@ elif page=='ETF反转机会':
     st.warning('L1/L2为研究预警，L3/L4亦不是自动买入指令；风险警示W不是卖空信号。真实订单需另行考虑未复权价格、滑点、持仓和止损。')
 
 elif page=='个股Alpha':
-    st.markdown('**筛选范围：20只ETF在上传的2026-11-02持仓快照中的前五大持仓。** 未有完整持仓的部分不强行声称已覆盖全部成分股。')
+    holdings=load_holdings()
+    holdings_date=holdings['holdings_date'].max() if 'holdings_date' in holdings else pd.NaT
+    holdings_date_text=str(holdings_date.date()) if pd.notna(holdings_date) else '未知日期'
+    st.markdown(f'**筛选范围：20只ETF在上传的{holdings_date_text}持仓快照中的前五大持仓。** 未有完整持仓的部分不强行声称已覆盖全部成分股。')
     if stock_latest<asof:
         missing=int(((cal>stock_latest)&(cal<=asof)).sum())
         st.error(f'个股行情落后ETF市场 {missing} 个交易日（股票最新 {stock_latest.date()}；ETF {asof.date()}）。**当前无法输出可交易的最新个股Alpha候选。** 以下仅可切换至有行情的历史研究日。')
@@ -166,11 +172,12 @@ elif page=='个股Alpha':
     if effective < cal.min():st.stop()
     stock_day=st.date_input('个股观察日 / Stock review date',value=effective.date(),min_value=cal.min().date(),max_value=effective.date())
     stock_day=cal[cal<=pd.Timestamp(stock_day)].max()
-    holdings=load_holdings()
-    if stock_day<pd.Timestamp(holdings.holdings_asof.dropna().max()):
-        st.warning('重要：ETF持仓关系来自2026-11-02单次快照，晚于所选个股研究日。历史股票对比只是事后描述，不能当作当时已知的ETF持仓或无偏回测。')
+    if pd.isna(holdings_date):
+        st.warning('ETF持仓快照日期不可解析，无法核对持仓是否早于研究日；个股关联仅供研究，不用于历史无偏回测。')
+    elif stock_day<holdings_date:
+        st.warning(f'重要：ETF持仓关系来自{holdings_date.date()}的单次快照，晚于所选个股研究日。历史股票对比仅为事后描述，不能当作当时已知的ETF持仓或无偏回测。')
     stocks=cached_stocks()
-    alpha=alpha_table(stocks,signals,holdings,stock_day,cal)
+    alpha=alpha_table(stocks,signals,holdings,stock_day,cal,observation_days=observation_days)
     if alpha.empty:st.info('该日期没有匹配行情。');st.stop()
     stock_filter=st.selectbox('关联ETF / ETF',['全部']+sorted(alpha.etf.unique().tolist()))
     if stock_filter!='全部':alpha=alpha[alpha.etf==stock_filter]
@@ -178,11 +185,12 @@ elif page=='个股Alpha':
     if only_signal:alpha=alpha[alpha.stock_signal.isin(['个股强势突破','个股持续领先','个股反转观察'])]
     show_records(alpha,{'etf':'关联ETF','ticker':'股票','symbol':'iFinD代码','weight_pct':'快照权重(%)',
         'date':'实际价格日','age_sessions':'缺失交易日','stock_signal':'个股状态',
-        'stock_ret_5':'5日涨幅','alpha_5':'5日超额','alpha_20':'20日超额','alpha_60':'60日超额',
-        'rvol20':'量比','alpha_strength_pp':'Alpha强度(百分点)'},
-        pct_cols=['stock_ret_5','alpha_5','alpha_20','alpha_60'],round_cols=['weight_pct','rvol20','alpha_strength_pp'],height=480)
+        'stock_ret_obs':f'{observation_days}日涨幅','alpha_obs':f'{observation_days}日Alpha','obs_alpha_rank':'ETF内排名',
+        'alpha_5':'5日超额','alpha_20':'20日超额','alpha_60':'60日超额',
+        'rvol20':'量比','alpha_strength_pp':'固定Alpha强度(百分点)'},
+        pct_cols=['stock_ret_obs','alpha_obs','alpha_5','alpha_20','alpha_60'],round_cols=['weight_pct','obs_alpha_rank','rvol20','alpha_strength_pp'],height=480)
     st.download_button('导出个股研究表 / Export stocks',data=table_download(alpha),file_name=f'USERM_stock_alpha_{stock_day.date()}.csv',mime='text/csv')
-    st.caption('仅对2026-11-02快照中的可解析美国上市证券进行研究；国外股票、无法确定的证券代码和历史缺失记录不强行补造。')
+    st.caption(f'仅对{holdings_date_text}快照中的可解析美国上市证券进行研究；国外股票、无法确定的证券代码和历史缺失记录不强行补造。')
     if not alpha.empty:
         show=alpha.iloc[0]
         st.markdown(f"首位观察对象：**{show['ticker']}** / 关联 **{show['etf']}** · [TradingView 股票图]({tradingview_url(show['ticker'])})")
