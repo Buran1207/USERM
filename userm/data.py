@@ -48,14 +48,12 @@ def load_holdings() -> pd.DataFrame:
         return pd.DataFrame(columns=["etf","ticker","symbol","weight_pct","holdings_asof"])
     d = pd.read_csv(f, encoding="utf-8-sig")
     d["weight_pct"] = pd.to_numeric(d["weight_pct"], errors="coerce")
-    # Updater/export files can contain mixed date formats, blank cells or
-    # free-form metadata. Never call pd.Timestamp() on a raw max() string.
-    # A separate parsed column preserves the source text for auditing.
-    if "holdings_asof" in d:
-        d["holdings_date"] = pd.to_datetime(d["holdings_asof"],
-                                            errors="coerce", format="mixed", utc=True).dt.tz_localize(None).dt.normalize()
-    else:
-        d["holdings_date"] = pd.NaT
+    # Some source cells include editorial notes, e.g. "2026-11-03（网页更新）".
+    # Extract only an ISO date, coerce invalid values to NaT; never call
+    # pd.Timestamp directly on a free-form holdings_asof string.
+    raw = d.get("holdings_asof", pd.Series(index=d.index, dtype="string"))
+    iso_date = raw.astype("string").str.extract(r"(\d{4}-\d{2}-\d{2})", expand=False)
+    d["holdings_date"] = pd.to_datetime(iso_date, format="%Y-%m-%d", errors="coerce")
     return d
 
 
