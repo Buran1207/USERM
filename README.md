@@ -1,23 +1,20 @@
-# USERM V1.2 — 美股20 ETF轮动与个股Alpha
+# USERM V1.3（2026-11-10）｜20只ETF专用相对轮动系统
 
-保留HKERM风格的Streamlit展示，**不使用机器学习、L1/L2/L3/L4反转交易信号、历史事件验证、自动交易**。V1.2从历史CPS:2日线计算20只ETF的同组相对表现、四象限和前五大持仓的股票相对收益。
+本版本以 **USERM V1.2** 为基础，**整个 USERM 仅研究20只ETF**，不再读取、保存或展示任何个股行情、前五大持仓、指数成分股、个股Alpha。**无机器学习、反转分级信号、历史交易事件验证、自动交易。**
 
-## 本版修改（相较于USERM V1.0）
+## 三个页面
 
-1. **修复 `pandas._libs.tslibs.parsing.DateParseError`**：原 `holdings_asof` 中可能有 `2026-11-03（网页更新）` 等注释，先正则提取 `YYYY-MM-DD` 并用 `errors='coerce'` 解析，日期不合法不再使个股页面报错。
-2. **左侧新增观察周期滑块**：1–60交易日，默认20日，步长1。实际改变ETF所选周期收益、同组超额收益、ETF组内排名、相对收益柱图、个股Alpha与历史价格图的相对收益面板。
-3. **删除低有效性模块**：删除ETF反转机会、历史事件验证页面，及L1–L4/W状态计算、表格标签、分布图和价格图触发标记。四象限只表达相对强弱，不当成已验证交易信号。
-4. 保留四个页面：**ETF市场总览、ETF轮动地图、个股Alpha、方法与数据质量**。
-5. 保持固定RRG定义：横轴基于对数相对强度的EMA14与EMA36差，纵轴为横轴5日比例变化。滑块不会修改RRG公式。
-6. 保持现有离线 `data/` 数据文件结构，**与此前 `US_DATA_MANAGER_USERM_SYNC_FIXED_20261105` 数据同步工具兼容**。
+1. **ETF市场总览**：11只行业ETF + 9只科技主题ETF分组相对收益排名、量价、柱状图和ETF走势；可导出CSV。
+2. **ETF轮动地图**：RRG近似四象限、历史轨迹、相对趋势EMA14/36及其5日变化。
+3. **方法与数据质量**：计算定义、最新日期、ETF覆盖及缺数记录。
 
-## GitHub / Streamlit部署
+左侧支持中文/English、**历史研究日期日历**（最早至最新可用行情，非交易日回退）、**1–60交易日观察周期滑块**（默认20）、ETF分组选择。观察周期控制收益和组内排名，但不改变RRG固定的EMA14/36与5日动量。
 
-将ZIP中的**全部文件和文件夹**上传到GitHub仓库根目录，入口 `app.py`。推荐 Python 3.12。不要把ZIP外层目录作为仓库中的新一级文件夹。
+## 安装与运行
 
-替换旧仓库时，请**删除**旧版文件 `userm/validation.py` 和 `METHODS_SIGNALS.md`（此包不再包含），否则虽不被调用，仓库仍会留有过期文档。
+将ZIP内所有文件直接放在GitHub仓库的**根目录**，Streamlit主入口设为 `app.py`。建议 Python 3.12。
 
-本地运行：
+本地Windows：
 
 ```bat
 cd /d C:\code\USERM\USERM_Streamlit_GitHub_V1_20261104
@@ -26,59 +23,97 @@ py -3.12 -m unittest discover -s tests -v
 py -3.12 -m streamlit run app.py
 ```
 
-亦可双击 `START_USERM.bat`。本版本**不要求配置 `USERM_VIEWER_PASSWORD`**。这不表示数据可以公开分发：仓库中包含供应商来源的行情快照，强烈建议使用私有仓库和Streamlit平台级访问权限，并确认数据许可；私有GitHub仓库并不自动保证部署网页私有。
+或双击 `START_USERM.bat`。本版无 `USERM_VIEWER_PASSWORD` 检查；**不代表行情已获得公开再分发授权**，应按照供应商许可管理仓库及网页访问权限。
 
-## 数据刷新（本项目不连接 iFinD）
+## GitHub旧仓库清理——非常重要
 
-优先继续使用你修复后的 `US_DATA_MANAGER_USERM_SYNC_FIXED_20261105`，在本地运行 `05_SYNC_ONLY_NO_API.bat` 或 `02_UPDATE_AND_SYNC_ONE_CLICK.bat`，它们会生成USERM网页需要的行情快照。随后把更新后的 `data/` 文件同步到GitHub `main/data/`。本V1.2读取路径和文件名完全不变。
+**用新ZIP覆盖旧文件，GitHub不会自动删除旧仓库里的文件。** 如果是在V1.2原仓库上升级，务必在 `main` 删除以下旧文件：
 
-也可使用本包自带的 `REFRESH_FROM_LOCAL_DATA.bat`，它调用：
+```text
+userm/stocks.py
+data/stock_prices_part1.csv.gz
+data/stock_prices_part2.csv.gz
+data/stock_master.csv
+data/holdings_snapshot.csv
+data/holdings_snapshot_raw.csv
+data/index_constituents_snapshot.csv
+```
+
+以前更老版本若存在 `userm/validation.py` 或 `METHODS_SIGNALS.md` 也删除。必须删除旧个股数据文件，否则它们虽不被新界面读取，仍可能在GitHub仓库中公开可见。
+
+如使用Git命令，在仓库根目录执行（不存在的文件按实际情况跳过）：
+
+```bat
+git rm -f userm/stocks.py data/stock_prices_part1.csv.gz data/stock_prices_part2.csv.gz data/stock_master.csv data/holdings_snapshot.csv data/holdings_snapshot_raw.csv data/index_constituents_snapshot.csv
+```
+
+然后提交和推送。本包已将旧个股数据文件名列入 `.gitignore`，防止以后误上传；**注意 .gitignore 无法自动删除已经被 Git 跟踪的文件**。
+
+## 数据结构
+
+```text
+USERM/
+├── app.py
+├── requirements.txt
+├── REFRESH_FROM_LOCAL_DATA.bat
+├── START_USERM.bat
+├── data/
+│   ├── etfs.csv
+│   ├── etf_codes.csv
+│   ├── etf_prices.csv.gz
+│   └── snapshot_manifest.json
+├── scripts/
+│   └── refresh_data.py
+├── tests/
+│   ├── test_rotation.py
+│   └── test_etf_refresh.py
+└── userm/
+    ├── config.py
+    ├── data.py
+    ├── signals.py
+    └── ui.py
+```
+
+内置价格快照来自先前上传的旧数据，**截止2026-11-03，不是2026-11-10实时行情**。请用已有的本地最新收盘数据刷新后再手动上传GitHub。
+
+## 今后更新：只刷新ETF、不再同步股票数据
+
+这次重写了本项目自带的 `scripts/refresh_data.py`，它只读取本地已有的20只ETF CPS2数据、生成 `data/etf_prices.csv.gz`、`data/etf_codes.csv`、`data/snapshot_manifest.json`。**不读取或生成个股文件，不调用iFinD API**。
+
+1. 如果 `C:\code\DATA\US\data\cps2_adjusted` 已更新完毕，只需双击新包内的 `REFRESH_FROM_LOCAL_DATA.bat`。
+2. 可手动执行：
 
 ```bat
 py -3.12 scripts\refresh_data.py --source "C:\code\DATA\US\data"
 ```
 
-它仅仅读取本地已存在CPS2文件，重建快照，不自动请求API；若源目录含有未收盘日行情，应首先运行你已修复的取数管理包，该管理包带美股收盘日安全截断机制。**本包的原版 `scripts/refresh_data.py` 不是交易所日历取数程序，不能替代盘中EOD安全控制。**
-
-需上传的行情数据：
+3. 刷新完成、终端显示 `SUCCESS: 20/20 ETFs` 后，仅上传以下文件到GitHub `main/data`：
 
 ```text
 data/etf_prices.csv.gz
-     stock_prices_part1.csv.gz
-     stock_prices_part2.csv.gz
-     snapshot_manifest.json
+data/etf_codes.csv
+data/snapshot_manifest.json
 ```
 
-`etfs.csv`、`etf_codes.csv`、`holdings_snapshot.csv`、`stock_master.csv` 等配置与持仓文件也需要保留。压缩后的股票行情分成2个文件，方便GitHub网页上传，不要重新合并为一个大文件。
+**盘中保护**：刷新程序使用NYSE官方交易所日历（含美国节假日、提前收盘、夏令时）计算最近已收盘时点，另外加入90分钟缓冲。即使原始CPS2有当天盘中记录也会排除；还要求发布的最后一天20/20 ETF数据齐备，并拒绝用更旧快照覆盖当前快照。依赖 `exchange-calendars` 已列入 requirements.txt。
 
-## 页面与公式
+**与原取数管理器的衔接**：现有 `US_DATA_MANAGER` 仍可负责采集本地CPS2行情，但请不要再使用旧版 `05_SYNC_ONLY_NO_API.bat` 把个股快照同步回这个ETF专用GitHub工程。改为运行上面的 **ETF-only刷新脚本**。如果每天原来是运行“取数+同步”一键程序，旧取数管理器的同步阶段仍可能重新创建个股文件；本项目未修改你Windows上原取数管理器的行为，建议采集与ETF快照刷新分开执行。
 
-**同组基准**：每只ETF与其所在组其他ETF的日收益等权组合比较（剔除自身）；11个行业ETF和9个科技主题ETF分别排名。它不是S&P500或Nasdaq100。
+## 方法
 
-**观察周期** `n ∈ [1,60]`：
+每只ETF以**同组其他ETF的等权日收益**构造同行基准（剔除本ETF）。11只行业和9只科技主题单独排名，**不进行大盘方向前置过滤**。
 
 ```text
-ETF_n = close(t)/close(t-n) - 1
-Peer_n = peer_index(t)/peer_index(t-n) - 1
+ETF_n = adjusted_close(t) / adjusted_close(t-n) - 1
+Peer_n = peer_index(t) / peer_index(t-n) - 1
 Excess_n = ETF_n - Peer_n
-Rank_n = within-group rank of Excess_n, descending
-```
-
-`n` 是**有效ETF市场交易日**间隔。缺失首日或末日行情时不使用上一条价格替代。所有分数仅用于描述当前相对强弱，不代表预测收益率。
-
-**RRG坐标固定**：
-
-```text
-RS = adjusted_ETF_close / own_leave-one-out_peer_index
+Rank_n = group rank(Excess_n, descending)
+RS = adjusted_ETF_close / own_peer_index
 X = 100 * exp( EMA14(log RS) - EMA36(log RS) )
 Y = 100 * X(t) / X(t-5)
 ```
 
-`X≥100/Y≥100`领先强化，`X≥100/Y<100`领先减弱，`X<100/Y≥100`落后改善，`X<100/Y<100`落后持续。这是公开可验证的透明近似，不是StockCharts专有JdK指标。
-
-**个股Alpha**：仅针对 `holdings_snapshot.csv` 中前五持仓可映射美股计算股票与其所属ETF的同周期相对收益，默认按所选 `n` 日超额从高到低排序。历史持仓关系来自较新的**单次快照**，不构成无幸存者偏差的历史回测。
-
-方法和边界请见 `METHODS_ROTATION.md` 与 `DATA_QUALITY.md`。
+X/Y以100分割四象限。RRG使用可解释的**自定义近似公式**，不是StockCharts专有JdK指标。不使用未来行情、缺失日不前向填补；历史数据不足时相应字段显示空值。详见 `METHODS_ROTATION.md`。
 
 ## 测试
 
@@ -86,4 +121,4 @@ Y = 100 * X(t) / X(t-5)
 py -3.12 -m unittest discover -s tests -v
 ```
 
-涵盖异常持仓日期、不同时段滑块、历史不使用未来价格、历史不足与缺日、个股Alpha与ETF超额计算的一致性。
+测试范围：20 ETF、1–60日观察周期、历史截断无未来信息、缺日与过期价格、市场已收盘截止日（含提前收盘）、ETF-only快照的完备性检查。Streamlit浏览器端仍需在你的实际Windows/Cloud环境启动验证。

@@ -16,45 +16,26 @@ def table(name: str) -> pd.DataFrame:
 
 
 def load_quotes(kind="etfs", path: Path|None=None) -> pd.DataFrame:
-    src = Path(path) if path else DATA / ("etf_prices.csv.gz" if kind == "etfs" else "stock_prices.csv.gz")
-    if kind == "stocks" and path is None:
-        parts=sorted(DATA.glob("stock_prices_part*.csv.gz"))
-        if parts:
-            df=pd.concat((pd.read_csv(f,usecols=lambda c: c in QUOTE_COLS,low_memory=False) for f in parts),ignore_index=True)
-        else:
-            df=pd.read_csv(src,usecols=lambda c: c in QUOTE_COLS,low_memory=False)
-    else:
-        df=pd.read_csv(src,usecols=lambda c: c in QUOTE_COLS,low_memory=False)
+    """Load only the 20 ETF adjusted EOD price histories."""
+    if kind != "etfs":
+        raise ValueError("USERM ETF-only: stock quote loading is no longer supported")
+    src = Path(path) if path is not None else DATA / "etf_prices.csv.gz"
+    df = pd.read_csv(src, usecols=lambda c: c in QUOTE_COLS, low_memory=False)
     missing = set(QUOTE_COLS) - set(df.columns)
     if missing:
-        raise ValueError(f"Missing quote columns in {src.name}: {sorted(missing)}")
+        raise ValueError(f"Missing ETF quote columns in {src.name}: {sorted(missing)}")
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["symbol"] = df["symbol"].astype(str).str.upper().str.strip()
     for c in NUMERIC:
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    df = df.dropna(subset=["date","symbol","close"])
+    df = df.dropna(subset=["date", "symbol", "close"])
     df = df[df["close"] > 0]
-    df = df.sort_values(["symbol","date"]).drop_duplicates(["symbol","date"], keep="last")
+    df = df.sort_values(["symbol", "date"]).drop_duplicates(["symbol", "date"], keep="last")
     return df.reset_index(drop=True)
 
 
 def load_etf_master() -> pd.DataFrame:
     return table("etfs.csv")
-
-
-def load_holdings() -> pd.DataFrame:
-    f = DATA / "holdings_snapshot.csv"
-    if not f.exists():
-        return pd.DataFrame(columns=["etf","ticker","symbol","weight_pct","holdings_asof"])
-    d = pd.read_csv(f, encoding="utf-8-sig")
-    d["weight_pct"] = pd.to_numeric(d["weight_pct"], errors="coerce")
-    # Some source cells include editorial notes, e.g. "2026-11-03（网页更新）".
-    # Extract only an ISO date, coerce invalid values to NaT; never call
-    # pd.Timestamp directly on a free-form holdings_asof string.
-    raw = d.get("holdings_asof", pd.Series(index=d.index, dtype="string"))
-    iso_date = raw.astype("string").str.extract(r"(\d{4}-\d{2}-\d{2})", expand=False)
-    d["holdings_date"] = pd.to_datetime(iso_date, format="%Y-%m-%d", errors="coerce")
-    return d
 
 
 def manifest() -> dict:

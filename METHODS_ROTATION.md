@@ -1,78 +1,52 @@
-# USERM V1.2｜相对轮动与个股Alpha计算规则
+# USERM V1.3｜ETF-only轮动计算方法
 
-## A. 市场研究范围
+## A. 研究对象
 
-- 交易观察核心为11只一级行业ETF与9只科技主题ETF，共20只，代码和分组详见 `data/etfs.csv`。
-- ETF排名**仅与同组其他ETF比较**。不以大盘趋势作为交易准入条件。
-- 研究对象为ETF及其快照前五大持仓中的可解析美股，不是全ETF成分股。
-- 不输出或保存L1–L4、反转胜率、后验交易信号或历史事件绩效。模型只给出**发生了什么**，不预测将发生什么。
+只使用20只ETF：11只行业ETF（XLC、XLY、XLP、XLE、XLF、XLV、XLI、XLB、VGT、XLU、VNQ）与9只科技主题ETF（SMH、IGV、CIBR、BAI、SKYY、DTCR、BOTZ、QTUM、GRID）。具体代码、iFinD后缀见 `data/etfs.csv`、`data/etf_codes.csv`。不再包含任何个股分析、指数成分或ETF持仓模块。
 
-## B. 输入和计算次序
+## B. 同组基准
 
-1. 读取离线CPS2调整后日OHLCV：日、证券代码、开、高、低、收、成交量。
-2. 对每个ETF `i` 取同组其余ETF，计算当日收盘到前收盘的收益，按可得样本**等权平均** `peer_return(i,t)`。最少3个有效同行样本。
-3. 从100开始逐日累乘得到ETF专属的 `peer_index(i,t)`，当日同行不足时置缺值，不虚构当日基准价格。
-4. RRG坐标使用该基准的相对强度，与观察周期滑块无关。
-5. 根据用户所选研究日 `t` 和观察周期 `n`，计算ETF与同行基准的 `t-n → t` 收益及超额，按组内超额高低排名。
-6. 个股在其本身和对应ETF都具备`t`与`t-n`原始记录时，计算同区间超额。历史持仓关系来自单次快照，因此仅是描述性分析。
+ETF i 的同组其余ETF（剔除i自身）日收益等权平均，需至少3个有效同行样本：
 
-## C. RRG定义
+`r_peer(i,t) = mean_{j in same group, j != i} [P(j,t)/P(j,t-1)-1]`
 
-`RS(i,t) = adjusted_close(i,t) / peer_index(i,t)`
+按日连乘为ETF专属的同行价格指数 `B(i,t)`。这不是官方指数，亦非资金流或交易强度的直接测量。若同行数据不足则基准当日标记缺失，不凭空补入一个可交易价格。
 
-`X(i,t) = 100 * exp[EMA14(ln RS(i,t)) - EMA36(ln RS(i,t))]`
+## C. RRG坐标（固定）
+
+`RS(i,t) = P(i,t)/B(i,t)`
+
+`X(i,t) = 100 * exp[ EMA14(ln RS(i,t)) - EMA36(ln RS(i,t)) ]`
 
 `Y(i,t) = 100 * X(i,t) / X(i,t-5)`
 
-- 领先强化：`X >=100, Y>=100`。
-- 领先减弱：`X >=100, Y<100`。
-- 落后改善：`X <100, Y>=100`。
-- 落后持续：`X <100, Y<100`。
+- X≥100且Y≥100：领先强化。
+- X≥100且Y<100：领先减弱。
+- X<100且Y≥100：落后改善。
+- X<100且Y<100：落后持续。
 
-`X/Y` 100为中性线。**X>100不保证ETF价格上涨**；Y>100表示5日内X改善，而非价格每天加速上涨。EMA使用 `pandas.Series.ewm(adjust=False, min_periods=span)`，不足36+5个有效历史数据点时不强行绘出四象限。上述是项目自定义的透明近似，非JdK专有计算式。
+EMA使用 `pandas.Series.ewm(span=...,adjust=False,min_periods=span)`；数据不足显示“历史不足”。Y>100仅表示相对趋势指标近5日提高，不保证ETF绝对价格上涨。此为USERM公开可解释的近似RRG，不是StockCharts专有JdK公式。
 
-## D. 观察周期滑块（1–60交易日）
+## D. 自选观察周期（1–60交易日）
 
-定义 `P(i,t)` 是ETF调整后收盘价，`B(i,t)` 是上述同行基准，`n` 是滑块选中的交易日数量：
+在所选研究日t和观察周期n，计算：
 
 `R(i,n,t) = P(i,t)/P(i,t-n)-1`
 
-`Rpeer(i,n,t) = B(i,t)/B(i,t-n)-1`
+`R_peer(i,n,t) = B(i,t)/B(i,t-n)-1`
 
-`A(i,n,t) = R(i,n,t)-Rpeer(i,n,t)`
+`Excess(i,n,t) = R(i,n,t)-R_peer(i,n,t)`
 
-`Rank(i,n,t) = 同组按A从高到低排序的名次`
+组内按Excess降序计算名次，`rotation_score` 为组内百分位*100（**不是上涨概率**）。改变观察周期会改变收益、超额、排名、柱状图、ETF价格附图；不改变RRG EMA14/36与5日变化的窗口。日期t-n为ETF市场交易日历上的真正n个交易日之前；缺失首尾价格不前向填充，过期ETF不参与当日排名。
 
-`Score(i,n,t) = 同组A的百分位*100`（仅显示组内相对分位，不是上涨概率）。
+## E. 数据范围与EOD安全
 
-滑块影响ETF表格、排序、可视化柱图、价格图副面板、个股Alpha。**不影响RRG坐标公式**。开始日和结束日均需真实行情记录；历史不足时显示缺失。若研究日ETF不存在当日行情，仍展示最后有效日期及其过期状态，但**不列入该日排名**。
+Streamlit只读已生成的 `etf_prices.csv.gz`，不调用API；数据来自CPS2，现金分红总回报口径尚未独立核验，不应把复权价直接当作交易委托价。
 
-## E. 个股Alpha
+本地 `scripts/refresh_data.py` 只读已完成下载的本地CPS2行情，使用NYSE交易日历及收盘后90分钟缓冲剔除未完成的交易日。最后可发布日必须有20/20 ETF行情，且不得早于旧快照日期。即使所选研究日为非交易日，网页也只会回退至此前已观测的交易日。
 
-给定同一个研究日和所选 `n`：
+## F. 边界
 
-`StockReturn(n,t) = StockClose(t)/StockClose(t-n)-1`
+没有大盘反转雷达、L1–L4信号、股票Alpha、个股研究、机器学习、自动交易、预测收益及历史事件回测。四象限只是对ETF相对状态的描述，不是买卖指令。分组内部同行基准不是全市场指数：当行业ETF整体下跌时，表现相对较强的ETF自身也可能下跌。
 
-`EtfReturn(n,t) = ETFclose(t)/ETFclose(t-n)-1`
-
-`StockAlpha(n,t) = StockReturn(n,t)-EtfReturn(n,t)`
-
-- 正数：所选时间内股票**相对该ETF**领先；负数相对落后。
-- 股票和ETF双方都必须在研究日、观察窗起点有真实收盘价，不可将缺失日的前一价格填上。
-- 股票缺失所选研究日行情会标记过期，不纳入有效相对排名。
-- 同一股票可能同时出现在不同ETF持仓，结果允许重复列示，但不代表独立的多项Alpha证据。
-
-## F. 截止日期与历史有效性
-
-- Streamlit只读取 `data/` 已同步的日线，不连接iFinD，不会在盘中向API取未收盘行情。
-- 生成新网页快照时应使用取数管理程序中纽约交易所**已完成收盘日**的日历截断。
-- 当前仓库中的历史ETF和个股数据可能并不同步，页面会给出警告。
-- `holdings_asof` 日期允许带网页注记。先提取 `YYYY-MM-DD`，无效日期转为缺值，**不能直接 `pd.Timestamp(字符串最大值)`**。
-- 只有ETF前五持仓和单次指数名单，不能用于真正按历史时点的投资组合绩效或事件胜率。
-- CPS2是原数据复权字段标签，尚未独立核验现金分红处理；真实委托价须用未复权数据。
-
-### 来源
-
-StockCharts RRG概念（不复制其专有指标）：https://help.stockcharts.com/charts-and-tools/other-charting-tools/rrg-charts
-
-纳斯达克Dorsey Wright相对强度方法，仅用于研究启发：https://nasdaqdorseywright.zendesk.com/hc/en-us/articles/12953391234445-What-Relative-Strength-Is-and-Isn-t
+参考阅读：StockCharts Relative Rotation Graphs (RRG) 对相对趋势及相对动量的定义：https://help.stockcharts.com/charts-and-tools/other-charting-tools/rrg-charts

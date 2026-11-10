@@ -1,8 +1,7 @@
-"""USERM V1.2 — 20 ETF relative rotation and stock Alpha monitor.
+"""USERM V1.3 — 20 ETF-only relative rotation monitor.
 
-Read-only Streamlit dashboard based on offline CPS2 snapshots. No ML, trade
-execution, L1-L4 trading alerts, or historical event backtest. Data may be
-licensed; apply hosting/access controls appropriate to your iFinD agreement.
+Read-only Streamlit dashboard using offline CPS2 ETF snapshots. No stock or
+holdings data, no ML, trade execution, L1-L4 alerts or event backtests.
 """
 from __future__ import annotations
 
@@ -10,10 +9,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from userm.data import load_quotes, load_etf_master, load_holdings, manifest
+from userm.data import load_quotes, load_etf_master, manifest
 from userm.signals import calculate_etf_signals, latest_table, window_series
-from userm.stocks import alpha_table
-from userm.ui import CSS, tt, fmt_pct, figstyle, rotation_map, price_chart, table_download, tradingview_url
+from userm.ui import CSS, tt, fmt_pct, figstyle, rotation_map, price_chart, table_download
 
 st.set_page_config(page_title='USERM | US ETF Rotation Monitor', page_icon='📈',
                    layout='wide', initial_sidebar_state='expanded')
@@ -25,10 +23,6 @@ def cached_etfs():
     master = load_etf_master()
     return calculate_etf_signals(load_quotes('etfs'), master), master
 
-
-@st.cache_data(show_spinner=False)
-def cached_stocks():
-    return load_quotes('stocks')
 
 
 def show_records(data: pd.DataFrame, columns: dict, pct_cols=(), round_cols=(), height=350):
@@ -47,13 +41,6 @@ def show_records(data: pd.DataFrame, columns: dict, pct_cols=(), round_cols=(), 
     st.dataframe(shown, use_container_width=True, hide_index=True, height=height)
 
 
-def safe_day(value):
-    """Manifest fields may be null or annotated text. Never raise on bad dates."""
-    if value is None:
-        return pd.NaT
-    date_part = pd.Series([str(value)]).str.extract(r'(\d{4}-\d{2}-\d{2})', expand=False).iloc[0]
-    return pd.to_datetime(date_part, format='%Y-%m-%d', errors='coerce')
-
 
 try:
     signals, master = cached_etfs()
@@ -68,15 +55,14 @@ if calendar.empty:
     st.stop()
 latest = calendar.max()
 quality = manifest()
-stock_latest = safe_day(quality.get('stocks', {}).get('max_date'))
 
 with st.sidebar:
-    st.markdown('<span style="color:#b98d8f;font-size:12px;letter-spacing:2px;font-weight:800">USERM · V1.2</span>',
+    st.markdown('<span style="color:#b98d8f;font-size:12px;letter-spacing:2px;font-weight:800">USERM · V1.3</span>',
                 unsafe_allow_html=True)
-    st.markdown('### US EQUITY ROTATION')
+    st.markdown('### US ETF ROTATION')
     lang = st.selectbox('Language / 语言', ['中文', 'English'], index=0)
     english = lang == 'English'
-    pages = ['ETF市场总览', 'ETF轮动地图', '个股Alpha', '方法与数据质量']
+    pages = ['ETF市场总览', 'ETF轮动地图', '方法与数据质量']
     page = st.radio('工作页面 / Workspace', pages, format_func=lambda value: tt(value, english))
     requested = st.date_input('研究日期 / As of', value=latest.date(),
                               min_value=calendar.min().date(), max_value=latest.date())
@@ -86,12 +72,11 @@ with st.sidebar:
         st.caption(f'非交易日，回退至 / Effective trading date: {asof.date()}')
     period = st.slider('观察周期 / Observation period (trading days)',
                        min_value=1, max_value=60, value=20, step=1,
-                       help='改变ETF排名、收益和个股Alpha；不改变RRG固定EMA14/36及5日动量。')
+                       help='改变ETF收益、超额收益和排名；不改变RRG固定EMA14/36及5日动量。')
     family = st.selectbox('ETF分组 / ETF family', ['全部', '行业', '科技主题'],
                           format_func=lambda value: tt(value, english))
     st.caption('观察周期影响收益和排名，不影响RRG坐标公式。')
     st.caption(f'ETF latest: {latest.date()}')
-    st.caption(f"Stock latest: {stock_latest.date() if pd.notna(stock_latest) else '未知'}")
     st.caption('离线EOD数据，只读网页。无自动行情抓取。')
 
 snapshot = latest_table(signals, asof, calendar, observation_days=period)
@@ -99,7 +84,7 @@ if family != '全部':
     snapshot = snapshot[snapshot.group == family].copy()
 fresh = snapshot[snapshot.fresh].copy()
 
-st.markdown('<div class="tag">USERM | 20 ETF ROTATION & STOCK ALPHA</div>', unsafe_allow_html=True)
+st.markdown('<div class="tag">USERM | 20 ETF RELATIVE ROTATION</div>', unsafe_allow_html=True)
 st.title(tt(page, english))
 st.caption(f'20 ETF universe · CPS:2 adjusted daily prices · As of {asof:%Y-%m-%d} EOD '
            f'· Observation {period} trading days · No ML')
@@ -170,65 +155,6 @@ elif page == 'ETF轮动地图':
     }, pct_cols=['ret_window','rel_window'], round_cols=['rs_ratio','rs_momentum','rotation_rank'], height=460)
     st.caption('Improving表示相对趋势改善，不意味着ETF价格一定上涨。')
 
-elif page == '个股Alpha':
-    st.markdown('研究范围为上传的20只ETF**前五大持仓快照**中可映射到美股的股票，不等于ETF全部持仓。')
-    try:
-        stocks = cached_stocks()
-    except Exception as error:
-        st.error(f'股票行情读取失败 / Stock quotes unavailable: {error}')
-        st.stop()
-    # Manifest might be old/stale; actual loaded price dates are authoritative.
-    actual_stock_last = pd.Timestamp(stocks.date.max()) if not stocks.empty else pd.NaT
-    if pd.isna(actual_stock_last):
-        st.warning('股票历史数据为空。请先更新本地快照。')
-        st.stop()
-    effective = min(asof, actual_stock_last)
-    eligible_dates = calendar[calendar <= effective]
-    if eligible_dates.empty:
-        st.info('股票行情时间范围和ETF时间范围没有交集。')
-        st.stop()
-    stock_asof = eligible_dates.max()
-    if stock_asof < asof:
-        missing = int(((calendar > stock_asof) & (calendar <= asof)).sum())
-        st.warning(f'股票最新实际行情为{actual_stock_last.date()}，落后所选ETF研究日{missing}个交易日。'
-                   '下方为历史研究，不能当作当期交易候选。')
-    stock_request = st.date_input('个股研究日期 / Stock review date',
-                                  value=stock_asof.date(), min_value=eligible_dates.min().date(),
-                                  max_value=stock_asof.date(), key='stock_review_date')
-    stock_day = eligible_dates[eligible_dates <= pd.Timestamp(stock_request)].max()
-    holdings = load_holdings()
-    known_dates = holdings.get('holdings_date', pd.Series(dtype='datetime64[ns]')).dropna()
-    if not known_dates.empty and stock_day < known_dates.max():
-        st.warning(f'ETF前五大持仓为较新的单次快照（最晚{known_dates.max().date()}），'
-                   f'晚于所选股票日{stock_day.date()}。这里仅做事后相对表现比较，不视为历史实时持仓。')
-    invalid_count = int(holdings.holdings_date.isna().sum()) if 'holdings_date' in holdings else 0
-    if invalid_count:
-        st.caption(f'部分持仓日期无法识别：{invalid_count}行已跳过日期比较，持仓关系仍需核实。')
-    alpha = alpha_table(stocks, signals, holdings, stock_day, calendar, observation_days=period)
-    if alpha.empty:
-        st.info('所选研究日没有ETF与股票同时匹配的行情。')
-        st.stop()
-    etf_filter = st.selectbox('关联ETF / ETF', ['全部'] + sorted(alpha.etf.unique().tolist()))
-    if etf_filter != '全部':
-        alpha = alpha[alpha.etf == etf_filter]
-    only_positive = st.checkbox(f'仅显示{period}日超额收益为正的股票', value=False)
-    if only_positive:
-        alpha = alpha[alpha.alpha_window > 0]
-    show_records(alpha, {
-        'etf':'关联ETF','ticker':'股票','symbol':'iFinD代码','weight_pct':'持仓快照权重(%)',
-        'date':'行情日期','age_sessions':'缺失交易日','position':'相对位置',
-        'stock_ret_window':f'股票{period}日收益','etf_ret_window':f'ETF{period}日收益',
-        'alpha_window':f'观察期{period}日超额','alpha_5':'5日超额','alpha_20':'20日超额','alpha_60':'60日超额',
-    }, pct_cols=['stock_ret_window','etf_ret_window','alpha_window','alpha_5','alpha_20','alpha_60'],
-        round_cols=['weight_pct'], height=480)
-    st.download_button('导出个股Alpha研究表', data=table_download(alpha),
-                       file_name=f'USERM_stock_alpha_{period}D_{stock_day.date()}.csv', mime='text/csv')
-    st.caption('个股和ETF均须在观察期首尾有真实行情，缺日不前向填充。超额收益不是未来收益预测。')
-    if not alpha.empty:
-        leader = alpha.iloc[0]
-        st.markdown(f"示例观察对象：**{leader['ticker']}**（关联 **{leader['etf']}**） · "
-                    f"[TradingView 股票图]({tradingview_url(leader['ticker'])})")
-
 elif page == '方法与数据质量':
     st.subheader('透明计算规则（非交易信号）')
     st.markdown('**基准**：11只行业ETF或9只科技主题ETF各自内部，其他ETF的日收益等权平均，'
@@ -243,22 +169,22 @@ elif page == '方法与数据质量':
                 '不输出L1–L4、风险警报或历史事件胜率。')
     st.subheader('数据覆盖及限制')
     if quality:
-        e, s = quality.get('etfs', {}), quality.get('stocks', {})
+        e = quality.get('etfs', {})
         cols = st.columns(4)
-        cols[0].metric('ETF行数', f"{e.get('rows', 0):,}")
+        cols[0].metric('ETF行情行数', f"{e.get('rows', 0):,}")
         cols[1].metric('ETF数量', f"{e.get('symbols_found', 0)}/20")
-        cols[2].metric('股票行数', f"{s.get('rows', 0):,}")
-        cols[3].metric('股票代码', str(s.get('symbols_found', 0)))
-        st.caption(f"ETF latest: {e.get('max_date','?')} | Stock latest: {s.get('max_date','?')} "
-                   f"| Snapshot generated UTC: {quality.get('generated_utc','?')}")
+        cols[2].metric('最早交易日', str(e.get('min_date', calendar.min().date())))
+        cols[3].metric('最新交易日', str(e.get('max_date', latest.date())))
+        st.caption(f"Snapshot generated UTC: {quality.get('generated_utc', '?')}")
     details = snapshot[['etf','date','age_sessions','fresh','peer_count','partition','rvol_20','rotation_rank']].sort_values('etf')
     st.dataframe(details, use_container_width=True, hide_index=True)
-    st.markdown('''1. CPS:2为原数据标记的复权价格；现金分红总回报口径未独立核验，不能作为实际委托价。
-2. ETF持仓和指数成分表均为单次快照，不具备历史逐日时点有效性。历史个股Alpha仅供事后描述。
-3. 观察周期严格按ETF市场交易日计算，不用上一条可得价格替代缺失端点。
-4. 未设置机器学习、反转打分、历史交易事件回测或自动交易功能。
-5. 仓库中的行情数据可能受iFinD授权限制；网页是否可公开访问由部署环境决定。''')
+    st.markdown('''1. CPS:2是数据源标注的复权价格；现金分红总回报口径未独立核验，也不是实际委托价格。
+2. 仅研究20只ETF，11只一级行业ETF及9只科技主题ETF分别进行组内相对收益比较。
+3. 观察周期严格按ETF市场交易日计算，期初或期末缺失行情不前向填充。
+4. RRG为可解释的EMA14/36与5日相对动量，并非StockCharts专有指标。
+5. 不使用机器学习、反转分级信号、历史交易事件回测或自动交易功能。
+6. 快照不得包含未收盘交易日；上传前核对最新日期及供应商数据许可。''')
     st.caption('详细方法：METHODS_ROTATION.md、README.md、DATA_QUALITY.md')
 
 st.divider()
-st.caption('USERM V1.2 | ETF relative-rotation and stock Alpha research only · Offline EOD snapshot · No execution')
+st.caption('USERM V1.3 | 20 ETF relative-rotation research only · Offline EOD snapshot · No execution')

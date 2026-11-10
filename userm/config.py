@@ -1,4 +1,4 @@
-"""USERM V1.2: explainable relative-rotation research, no L1-L4 alerts."""
+"""USERM V1.3: explainable relative-rotation research, no L1-L4 alerts."""
 from dataclasses import dataclass
 from pathlib import Path
 

@@ -1,148 +1,227 @@
-r"""Offline import of preexisting CPS:2 iFinD CSV.GZ files into small GitHub dashboard snapshots.
+r"""ETF-only offline snapshot refresh from locally downloaded CPS:2 daily bars.
 
-Windows example:
- py -3.12 scripts\refresh_data.py --source C:\code\DATA\US\data
-For shipped test/snapshot creation from an uploaded archive:
- python scripts/refresh_data.py --cps2-zip /path/cps2_adjusted.zip
+  py -3.12 scripts\refresh_data.py --source "C:\code\DATA\US\data"
+  python scripts/refresh_data.py --cps2-zip /path/to/cps2_adjusted.zip
 
-No download, web, login, quota use, training or modification of source data.
+Never calls iFinD or fetches network data. Excludes any session which has not
+closed at NYSE, plus a 90-minute EOD buffer. Requires complete 20-ETF coverage
+on the latest published session and rejects stale snapshot overwrites.
 """
 from __future__ import annotations
-import argparse,csv,gzip,io,json,re,sys,zipfile
+
+import argparse
+import csv
+import gzip
+import io
+import json
+import os
+import re
+import tempfile
+import zipfile
 from collections import defaultdict
-from datetime import datetime,timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-ROOT=Path(__file__).resolve().parents[1]
-DATA=ROOT/'data'
-COLUMNS=['date','symbol','open','high','low','close','volume','partition']
+import exchange_calendars as xcals
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+DATA = ROOT / 'data'
+COLUMNS = ['date','symbol','open','high','low','close','volume','partition']
 
 
-def read_csv(path):
-    with Path(path).open(encoding='utf-8-sig',newline='') as f:return list(csv.DictReader(f))
+def last_safe_session(now_utc: datetime | None = None, buffer_minutes: int = 90) -> str:
+    """Last NYSE session whose *actual scheduled* close is over 90 min ago.
+
+    NYSE includes normal holiday, early-close and DST schedules; therefore
+    do not infer a US close from a fixed clock time or weekday arithmetic.
+    """
+    now = now_utc or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError('now_utc must be timezone-aware')
+    now = now.astimezone(timezone.utc)
+    cal = xcals.get_calendar('XNYS')
+    end = pd.Timestamp(now.date())
+    start = end - pd.Timedelta(days=35)
+    sessions = cal.sessions_in_range(start, end)
+    for session in reversed(sessions):
+        close = cal.session_close(session).to_pydatetime().astimezone(timezone.utc)
+        if now >= close + timedelta(minutes=buffer_minutes):
+            return session.date().isoformat()
+    raise RuntimeError('No safely completed NYSE session in the past 35 days')
 
 
 class Source:
-    def __init__(self, source:Path|None, zipname:Path|None):
-        self.archive=zipfile.ZipFile(zipname) if zipname else None
-        if self.archive:
-            self.root=str(zipname)
-            paths=[n for n in self.archive.namelist() if n.lower().endswith('.csv.gz')]
+    def __init__(self, source: Path | None, archive_path: Path | None):
+        self.archive = zipfile.ZipFile(archive_path) if archive_path else None
+        if self.archive is not None:
+            filenames = [n for n in self.archive.namelist() if n.lower().endswith('.csv.gz')]
         else:
-            if not source or not source.exists():raise FileNotFoundError(f'Missing source directory: {source}')
-            self.root=str(source)
-            paths=list(source.rglob('*.csv.gz'))
-        self.record={}; self.symbols=defaultdict(set)
-        for p in paths:
-            name=str(p).replace('\\','/')
-            m=re.search(r'/(train|oos)/(20\d\d)/([^/]+\.csv\.gz)$',name,re.I)
-            if not m: continue
-            partition,yr,basename=m.groups()
-            sym=basename[:-7].upper()  # strip '.csv.gz'
-            self.record[(sym,int(yr),partition.lower())]=p
-            self.symbols[sym.rsplit('.',1)[0]].add(sym)
-        print('Indexed',len(self.record),'symbol-year files, unique symbols',len(set(k[0] for k in self.record)))
-    def read(self,path):
-        raw=self.archive.read(path) if self.archive else Path(path).read_bytes()
-        return csv.DictReader(io.StringIO(gzip.decompress(raw).decode('utf-8-sig',errors='replace')))
-    def bars(self,symbol):
-        for key in sorted(k for k in self.record if k[0]==symbol):
-            _,year,part=key
-            if (year < 2026 and part!='train') or (year >= 2026 and part!='oos'):
+            if source is None or not source.is_dir():
+                raise FileNotFoundError(f'Local CPS2 directory does not exist: {source}')
+            filenames = list(source.rglob('*.csv.gz'))
+        self.by_file = {}
+        self.by_base = defaultdict(set)
+        for path in filenames:
+            name = str(path).replace('\\','/')
+            match = re.search(r'/(train|oos)/(20\d\d)/([^/]+\.csv\.gz)$',name,re.I)
+            if not match:
                 continue
-            for row in self.read(self.record[key]):
-                yield row,part.upper()
-    def resolve(self,base,known=None):
-        base=str(base).upper().strip(); known=known or set()
-        if base in known:return base
-        choices=self.symbols.get(base,())
-        if not choices: return ''
-        matching=sorted([s for s in choices if s in known]);
-        if len(matching)==1:return matching[0]
-        # Used for top-5 research only; ambiguous symbols are excluded, never guessed.
-        return next(iter(choices)) if len(choices)==1 else ''
+            partition, year, basename = match.groups()
+            symbol = basename[:-7].upper()
+            self.by_file[(symbol, int(year), partition.lower())] = path
+            self.by_base[symbol.rsplit('.',1)[0]].add(symbol)
+        print('Indexed CPS2 symbol-year files:', len(self.by_file))
+
+    def resolve(self, symbol: str) -> str:
+        symbol = str(symbol).upper().strip()
+        choices = self.by_base.get(symbol, set())
+        if symbol in choices:
+            return symbol
+        # Avoid arbitrary selection if exchange suffix is ambiguous.
+        return next(iter(choices)) if len(choices) == 1 else ''
+
+    def iter_bars(self, symbol: str):
+        filenames = sorted((k for k in self.by_file if k[0] == symbol),key=lambda k:(k[1],k[2]))
+        for _, year, partition in filenames:
+            if (year < 2026 and partition != 'train') or (year >= 2026 and partition != 'oos'):
+                continue
+            path = self.by_file[(symbol,year,partition)]
+            raw = self.archive.read(path) if self.archive else Path(path).read_bytes()
+            with io.StringIO(gzip.decompress(raw).decode('utf-8-sig', errors='replace')) as handle:
+                for row in csv.DictReader(handle):
+                    yield row, partition.upper()
+
     def close(self):
-        if self.archive:self.archive.close()
+        if self.archive:
+            self.archive.close()
 
 
-def export_symbol_snapshot(path:Path,symbols,source:Source):
-    rows=0;bad=0; latest={}; bypart={'TRAIN':0,'OOS':0}; found=set()
-    with gzip.open(path,'wt',encoding='utf-8',newline='',compresslevel=1) as handle:
-        wr=csv.DictWriter(handle,fieldnames=COLUMNS,lineterminator='\n');wr.writeheader()
-        for symbol in sorted(symbols):
-            for raw,part in source.bars(symbol):
-                try:
-                    dt=str(raw.get('date','')).strip()[:10]
-                    close=float(raw['close'])
-                    if not (2020<=int(dt[:4])<=2100 and close>0): raise ValueError('bad price/date')
-                    day=dict(date=dt,symbol=symbol,open=raw.get('open',''),high=raw.get('high',''),low=raw.get('low',''),close=raw.get('close',''),volume=raw.get('volume',''),partition=part)
-                    wr.writerow(day);rows+=1;bypart[part]+=1;found.add(symbol)
-                    if dt>latest.get(symbol,''): latest[symbol]=dt
-                except (ValueError,KeyError,TypeError):bad+=1
-    return {'rows':rows,'symbols_found':len(found),'symbols_requested':len(symbols),'invalid_rows':bad,'partition_rows':bypart,'max_date':max(latest.values(),default=''),'latest_by_symbol':latest}
+def read_csv(path: Path):
+    with path.open(encoding='utf-8-sig', newline='') as f:
+        return list(csv.DictReader(f))
+
+
+def make_snapshot(source: Source, cutoff: str):
+    universe = read_csv(DATA / 'etfs.csv')
+    if len(universe) != 20 or len({r['etf'] for r in universe}) != 20:
+        raise ValueError('etfs.csv must contain exactly 20 distinct ETF tickers')
+    mapped = {r['etf']: source.resolve(r['etf']) for r in universe}
+    missing = [etf for etf, symbol in mapped.items() if not symbol]
+    if missing:
+        raise ValueError(f'ETF source files missing or ambiguous: {missing}')
+    all_rows = []
+    invalid = 0
+    seen_dates = defaultdict(set)
+    for etf, symbol in sorted(mapped.items()):
+        keyed = {}
+        for raw, partition in source.iter_bars(symbol):
+            try:
+                dt = str(raw['date']).strip()[:10]
+                parsed = datetime.strptime(dt,'%Y-%m-%d')
+                if parsed.year < 2020 or dt > cutoff:
+                    continue
+                close = float(raw['close'])
+                if not (close > 0):
+                    raise ValueError('Nonpositive close')
+                keyed[dt] = dict(date=dt,symbol=symbol,
+                                 open=raw.get('open',''),high=raw.get('high',''),
+                                 low=raw.get('low',''),close=raw['close'],
+                                 volume=raw.get('volume',''),partition=partition)
+            except (KeyError,TypeError,ValueError,OverflowError):
+                invalid += 1
+        for dt, item in keyed.items():
+            seen_dates[dt].add(etf)
+            all_rows.append(item)
+    # Do not publish an incompletely collected latest session. First find the
+    # most recent session on which *all* 20 ETF prices are available.
+    complete = [date for date, etfs in seen_dates.items() if len(etfs) == 20]
+    if not complete:
+        raise RuntimeError('No single session with 20/20 ETF records; refusing overwrite')
+    latest = max(complete)
+    all_rows = sorted((r for r in all_rows if r['date'] <= latest),
+                      key=lambda r:(r['symbol'],r['date']))
+    if not all_rows:
+        raise RuntimeError('No valid ETF historical data at cutoff')
+    seen = defaultdict(list)
+    bypart = {'TRAIN':0, 'OOS':0}
+    for r in all_rows:
+        seen[r['symbol']].append(r['date'])
+        bypart[r['partition']] += 1
+    info = {'rows':len(all_rows),'symbols_found':len(seen),
+            'symbols_requested':len(mapped),'invalid_rows':invalid,
+            'partition_rows':bypart,'min_date':min(r['date'] for r in all_rows),
+            'max_date':latest,'latest_by_symbol':{s:max(dates) for s,dates in seen.items()}}
+    return mapped, all_rows, info
+
+
+def publish(mapped: dict, rows: list, info: dict, cutoff: str, source_type: str):
+    DATA.mkdir(parents=True, exist_ok=True)
+    snapshot_path = DATA / 'etf_prices.csv.gz'
+    mapping_path = DATA / 'etf_codes.csv'
+    manifest_path = DATA / 'snapshot_manifest.json'
+    existing = {}
+    if manifest_path.exists():
+        existing = json.loads(manifest_path.read_text(encoding='utf-8'))
+    old_latest = existing.get('etfs',{}).get('max_date','')
+    if old_latest and info['max_date'] < old_latest:
+        raise RuntimeError(f'New snapshot ends {info["max_date"]}, before existing {old_latest}; refusing downgrade')
+    manifest = {
+        'name':'USERM 20 ETF only snapshot',
+        'schema':'USERM-ETF-v1',
+        'generated_utc':datetime.now(timezone.utc).isoformat(),
+        'source':'preexisting local CPS:2 daily files; no iFinD API calls',
+        'source_path_type':source_type,
+        'adjustment':'CPS:2 as labeled by source; total return handling not independently verified',
+        'universe':'11 sector ETFs and 9 tech-theme ETFs; no individual stocks',
+        'last_safe_nyse_session':cutoff,
+        'published_last_complete_etf_session':info['max_date'],
+        'etfs':info,
+        'warnings':[]}
+    # Stage then replace. Existing data stays unchanged if parsing fails.
+    stage_dir = Path(tempfile.mkdtemp(prefix='.userm_etf_',dir=DATA))
+    try:
+        new_quotes = stage_dir / 'etf_prices.csv.gz'
+        with gzip.open(new_quotes,'wt',encoding='utf-8',newline='',compresslevel=3) as handle:
+            writer = csv.DictWriter(handle,fieldnames=COLUMNS,lineterminator='\n')
+            writer.writeheader(); writer.writerows(rows)
+        new_codes = stage_dir / 'etf_codes.csv'
+        with new_codes.open('w',encoding='utf-8-sig',newline='') as handle:
+            writer = csv.writer(handle);writer.writerow(['etf','symbol'])
+            writer.writerows(sorted(mapped.items()))
+        new_manifest = stage_dir / 'snapshot_manifest.json'
+        new_manifest.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+        # Verify staged gzip and full ticker mapping before replacing files.
+        with gzip.open(new_quotes,'rt',encoding='utf-8') as handle:
+            n = sum(1 for _ in handle) - 1
+        if n != info['rows'] or len(mapped) != 20 or info['symbols_found'] != 20:
+            raise RuntimeError('Staged ETF snapshot validation failed')
+        os.replace(new_quotes,snapshot_path)
+        os.replace(new_codes,mapping_path)
+        os.replace(new_manifest,manifest_path)
+    finally:
+        import shutil
+        shutil.rmtree(stage_dir, ignore_errors=True)
+    print(f'SUCCESS: {info["symbols_found"]}/20 ETFs, {info["rows"]:,} bars, '
+          f'{info["min_date"]} -> {info["max_date"]}, NYSE safe cutoff {cutoff}')
+    print('Upload to GitHub main/data:',snapshot_path.name,mapping_path.name,manifest_path.name)
 
 
 def run(opts):
-    source=Source(Path(opts.source) if opts.source else None,Path(opts.cps2_zip) if opts.cps2_zip else None)
-    DATA.mkdir(parents=True,exist_ok=True)
-    etfs=read_csv(DATA/'etfs.csv')
-    etf_resolve={r['etf']:source.resolve(r['etf']) for r in etfs}
-    not_found=[etf for etf,code in etf_resolve.items() if not code]
-    if not_found:print('WARNING ETF missing:',not_found)
-    index=read_csv(DATA/'index_constituents_snapshot.csv')
-    names={r['symbol']:r['name_zh'] for r in index}
-    idx=set(names)
-    known=idx|set(etf_resolve.values())
-    holdings=read_csv(DATA/'holdings_snapshot_raw.csv')
-    holding_records=[];extra=set()
-    for r in holdings:
-        symbol=source.resolve(r['ticker'],known)
-        # Index files may be missing; unresolved foreign holdings have blank symbol.
-        if symbol and symbol not in etf_resolve.values():extra.add(symbol)
-        holding_records.append(dict(etf=r['etf'],ticker=r['ticker'],symbol=symbol,weight_pct=r['weight_pct'],raw_description=r['raw_description'],holdings_asof=r['holdings_asof']))
-    with (DATA/'holdings_snapshot.csv').open('w',newline='',encoding='utf-8-sig') as out:
-        wr=csv.DictWriter(out,fieldnames=list(holding_records[0].keys()));wr.writeheader();wr.writerows(holding_records)
-    with (DATA/'etf_codes.csv').open('w',newline='',encoding='utf-8-sig') as out:
-        wr=csv.writer(out);wr.writerow(['etf','symbol']);wr.writerows(sorted(etf_resolve.items()))
-    stock_symbols=(idx|extra)-{''}
-    with (DATA/'stock_master.csv').open('w',newline='',encoding='utf-8-sig') as out:
-        wr=csv.writer(out);wr.writerow(['symbol','name_zh','source_list']);
-        for code in sorted(stock_symbols):
-            cats=','.join(sorted({r['index_name'] for r in index if r['symbol']==code})) or 'ETF top5 snapshot'
-            wr.writerow([code,names.get(code,code.split('.')[0]),cats])
-    info_etf=export_symbol_snapshot(DATA/'etf_prices.csv.gz',{s for s in etf_resolve.values() if s},source)
-    print('ETFs',info_etf['rows'],info_etf['symbols_found'],'latest',info_etf['max_date'])
-    # Keep each file under GitHub's 25 MiB browser upload cap.
-    ordered=sorted(stock_symbols)
-    half=(len(ordered)+1)//2
-    stock_parts=[]
-    for n, group in enumerate((ordered[:half], ordered[half:]), start=1):
-        stock_parts.append(export_symbol_snapshot(DATA/f'stock_prices_part{n}.csv.gz',group,source))
-    old=DATA/'stock_prices.csv.gz'
-    if old.exists():old.unlink()
-    info_stock={'rows':sum(p['rows'] for p in stock_parts),
-                'symbols_found':sum(p['symbols_found'] for p in stock_parts),
-                'symbols_requested':sum(p['symbols_requested'] for p in stock_parts),
-                'invalid_rows':sum(p['invalid_rows'] for p in stock_parts),
-                'partition_rows':{k:sum(p['partition_rows'][k] for p in stock_parts) for k in ('TRAIN','OOS')},
-                'max_date':max(p['max_date'] for p in stock_parts),
-                'latest_by_symbol':{k:v for p in stock_parts for k,v in p['latest_by_symbol'].items()}}
-    print('Stocks',info_stock['rows'],info_stock['symbols_found'],'latest',info_stock['max_date'])
-    doc={'name':'USERM snapshot','schema':'USERM-v1','generated_utc':datetime.now(timezone.utc).isoformat(),
-         'source':'preexisting local CPS:2 yearly files; no API extraction','source_path_type':'archive' if opts.cps2_zip else 'local directory',
-         'adjustment':'CPS:2 as labeled by source; total-return treatment NOT independently verified',
-         'point_in_time':'ETF holdings are one 2026-11-02 snapshot, index membership provided as current, historical membership NOT verified',
-         'metadata_bd':'not used for historical signal generation; uploaded BD explicitly PIT-unverified',
-         'etfs':info_etf,'stocks':info_stock,'warnings':not_found}
-    (DATA/'snapshot_manifest.json').write_text(json.dumps(doc,ensure_ascii=False,indent=2),encoding='utf-8')
-    source.close()
-    print('Done:',DATA,'Stock quote parts MiB',[(p.name,round(p.stat().st_size/1024**2,2)) for p in DATA.glob('stock_prices_part*.csv.gz')])
+    # Critical: determine the *live* cutoff before inspecting raw snapshots.
+    cutoff = last_safe_session()
+    source = Source(Path(opts.source) if opts.source else None,
+                    Path(opts.cps2_zip) if opts.cps2_zip else None)
+    try:
+        mapped, rows, info = make_snapshot(source, cutoff)
+    finally:
+        source.close()
+    publish(mapped,rows,info,cutoff,'archive' if opts.cps2_zip else 'local directory')
 
 
-if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__)
-    group=p.add_mutually_exclusive_group(required=True)
-    group.add_argument('--source',help=r'C:\code\DATA\US\data (must contain cps2_adjusted/train + oos)')
-    group.add_argument('--cps2-zip',help='Existing offline CPS2 archive, read without extracting')
-    args=p.parse_args()
-    run(args)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--source',help=r'C:\code\DATA\US\data (contains cps2_adjusted/train & oos)')
+    group.add_argument('--cps2-zip',help='Existing local CPS:2 zip archive')
+    run(parser.parse_args())

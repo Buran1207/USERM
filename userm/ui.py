@@ -20,7 +20,7 @@ h1,h2,h3{letter-spacing:-.025em}h1{font-weight:780!important}
 
 TRANS = {
     'ETF市场总览': 'ETF Overview', 'ETF轮动地图': 'Rotation Map',
-    '个股Alpha': 'Stock Alpha', '方法与数据质量': 'Methods & Data Quality',
+    '方法与数据质量': 'Methods & Data Quality',
     '行业': 'Sector', '科技主题': 'Tech Theme', '全部': 'All',
     '领先强化': 'Leading', '领先减弱': 'Weakening',
     '落后改善': 'Improving', '落后持续': 'Lagging',
@@ -101,6 +101,3 @@ def price_chart(chart_data: pd.DataFrame, symbol: str, observation_days: int):
 def table_download(frame: pd.DataFrame):
     return frame.to_csv(index=False).encode('utf-8-sig')
 
-def tradingview_url(symbol):
-    from urllib.parse import quote
-    return f"https://www.tradingview.com/symbols/{quote(str(symbol).split('.')[0])}/"

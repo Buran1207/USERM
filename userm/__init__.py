@@ -1,2 +1,2 @@
-"""USERM: deterministic, explainable US ETF rotation and relative strength research."""
-__version__ = "1.0.0"
+"""USERM ETF-only relative rotation research."""
+__version__ = "1.3.0"
