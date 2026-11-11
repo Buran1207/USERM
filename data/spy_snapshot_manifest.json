@@ -1,0 +1,15 @@
+{
+  "schema": "USERM-SPY-ETF-BENCHMARK-v1",
+  "symbol": "SPY.P",
+  "ticker": "SPY",
+  "description": "SPDR S&P 500 ETF Trust; S&P 500 tracking ETF proxy, NOT SPX index",
+  "source": "iFinD THS_HQ",
+  "adjustment": "CPS:2",
+  "price_basis": "vendor-adjusted ETF price; not equivalent to SPX cash price index",
+  "rows": 1724,
+  "min_date": "2020-01-02",
+  "max_date": "2026-11-10",
+  "last_safe_session": "2026-11-10",
+  "generated_utc": "2026-11-11T03:02:30.940668+00:00",
+  "user_m_app_note": "Supplemental benchmark files only; V13 app requires separate reader changes to use SPY."
+}
