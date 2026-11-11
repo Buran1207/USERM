@@ -1,13 +1,14 @@
 {
-  "name": "USERM 20 ETF only snapshot",
-  "schema": "USERM-ETF-v1",
-  "generated_utc": "2026-11-11T03:02:29.732732+00:00",
-  "source": "preexisting local CPS:2 daily files; no iFinD API calls",
+  "name": "USERM 20 ETF + SPY benchmark EOD snapshot",
+  "schema": "USERM-ETF-SPY-v1",
+  "generated_utc": "2026-11-11T05:30:36.845542+00:00",
+  "source": "preexisting local CPS:2 adjusted daily files; no iFinD API calls",
   "source_path_type": "local directory",
-  "adjustment": "CPS:2 as labeled by source; total return handling not independently verified",
-  "universe": "11 sector ETFs and 9 tech-theme ETFs; no individual stocks",
+  "adjustment": "CPS:2 per source; dividend / total-return comparability not independently verified",
+  "universe": "20 target ETFs; SPY is ONLY RRG benchmark, excluded from ranks",
+  "rrg_benchmark": "SPY",
   "last_safe_nyse_session": "2026-11-10",
-  "published_last_complete_etf_session": "2026-11-10",
+  "published_last_complete_21_session": "2026-11-10",
   "etfs": {
     "rows": 31902,
     "symbols_found": 20,
@@ -41,6 +42,13 @@
       "XLV.P": "2026-11-10",
       "XLY.P": "2026-11-10"
     }
+  },
+  "spy": {
+    "symbol": "SPY.P",
+    "rows": 1724,
+    "invalid_rows": 0,
+    "min_date": "2020-01-02",
+    "max_date": "2026-11-10"
   },
   "warnings": []
 }

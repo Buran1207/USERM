@@ -1,124 +1,91 @@
-# USERM V1.3（2026-11-10）｜20只ETF专用相对轮动系统
+# USERM V1.5 — 20只ETF轮动 + SPY统一RRG基准
 
-本版本以 **USERM V1.2** 为基础，**整个 USERM 仅研究20只ETF**，不再读取、保存或展示任何个股行情、前五大持仓、指数成分股、个股Alpha。**无机器学习、反转分级信号、历史交易事件验证、自动交易。**
+本版把V1.4的RRG基准从标普500价格指数`$SPX`**彻底改为**可交易ETF `SPY`，并保留原20只ETF组内超额收益和相对排名。**SPY仅是RRG基准，不是第21只研究/交易ETF。**
 
-## 三个页面
+## 页面与方法（延续V1.4）
 
-1. **ETF市场总览**：11只行业ETF + 9只科技主题ETF分组相对收益排名、量价、柱状图和ETF走势；可导出CSV。
-2. **ETF轮动地图**：RRG近似四象限、历史轨迹、相对趋势EMA14/36及其5日变化。
-3. **方法与数据质量**：计算定义、最新日期、ETF覆盖及缺数记录。
+- **ETF市场总览**：20只ETF；1–60交易日观察周期滑块；同组（11行业/9科技主题）剔除自身的ETF等权收益作为Alpha对照；排名与RRG基准相互独立。
+- **ETF轮动地图**：所有20只ETF统一相对`SPY`；默认透明SMA10/30/9 RRG近似，允许切换至旧EMA14/36+5日公式；日线、尾长默认4，尾长**只控制显示**。
+- **方法与数据质量**：查看数据区间、SPY基准行情与公式。研究日期为历史交易日历选择，可查询历史行情，不使用未来价格。
 
-左侧支持中文/English、**历史研究日期日历**（最早至最新可用行情，非交易日回退）、**1–60交易日观察周期滑块**（默认20）、ETF分组选择。观察周期控制收益和组内排名，但不改变RRG固定的EMA14/36与5日动量。
+无个股、L1–L4、机器学习、自动交易或公开JdK专有公式的冒充实现。
 
-## 安装与运行
+## 重要说明：本包不可能包含你电脑刚更新的最新行情
 
-将ZIP内所有文件直接放在GitHub仓库的**根目录**，Streamlit主入口设为 `app.py`。建议 Python 3.12。
+打包基于之前提供的USERM V1.4版本：其内置的20只ETF数据截至**2026-11-03**，以前上传的CPS2文件**没有SPY历史数据**。因此本ZIP **不包含`data/spy_prices.csv.gz`**，不会伪造SPY最新价格，也不声称已把你电脑上的2026-11-10收盘价包含在包中。
 
-本地Windows：
+请务必先在你自己的电脑解压/覆盖代码（切勿把ZIP内的旧`data`覆盖掉你现有更新较新的文件），然后运行本地刷新脚本，生成与现有最新数据一致的真实SPY和20只ETF行情。
+
+## Windows本地一键更新（不调用iFinD）
+
+安装依赖（首次执行）：
 
 ```bat
 cd /d C:\code\USERM\USERM_Streamlit_GitHub_V1_20261104
 py -3.12 -m pip install -r requirements.txt
-py -3.12 -m unittest discover -s tests -v
-py -3.12 -m streamlit run app.py
 ```
 
-或双击 `START_USERM.bat`。本版无 `USERM_VIEWER_PASSWORD` 检查；**不代表行情已获得公开再分发授权**，应按照供应商许可管理仓库及网页访问权限。
+在你部署USERM的实际项目根目录中双击：
 
-## GitHub旧仓库清理——非常重要
+**`REFRESH_ETF_AND_SPY.bat`**
 
-**用新ZIP覆盖旧文件，GitHub不会自动删除旧仓库里的文件。** 如果是在V1.2原仓库上升级，务必在 `main` 删除以下旧文件：
+它从本地已更新的：
 
-```text
-userm/stocks.py
-data/stock_prices_part1.csv.gz
-data/stock_prices_part2.csv.gz
-data/stock_master.csv
-data/holdings_snapshot.csv
-data/holdings_snapshot_raw.csv
-data/index_constituents_snapshot.csv
-```
+`C:\code\DATA\US\data\cps2_adjusted`
 
-以前更老版本若存在 `userm/validation.py` 或 `METHODS_SIGNALS.md` 也删除。必须删除旧个股数据文件，否则它们虽不被新界面读取，仍可能在GitHub仓库中公开可见。
-
-如使用Git命令，在仓库根目录执行（不存在的文件按实际情况跳过）：
+读取 **20 ETF + SPY，共21只标的**，检查真实纽交所收盘日（包括提前收盘和夏令时）及收盘后90分钟缓冲，不读取当日尚未完成的K线。SPY源代码若存在多个交易所后缀，请用下面命令明确指定，例如：
 
 ```bat
-git rm -f userm/stocks.py data/stock_prices_part1.csv.gz data/stock_prices_part2.csv.gz data/stock_master.csv data/holdings_snapshot.csv data/holdings_snapshot_raw.csv data/index_constituents_snapshot.csv
+py -3.12 scripts\refresh_data.py --source "C:\code\DATA\US\data\cps2_adjusted" --spy-symbol SPY.P
 ```
 
-然后提交和推送。本包已将旧个股数据文件名列入 `.gitignore`，防止以后误上传；**注意 .gitignore 无法自动删除已经被 Git 跟踪的文件**。
+刷新只有在20只ETF和SPY均具有**同一最新完整交易日**时才发布；若SPY数据缺失/过旧则报错，避免悄悄用其他ETF替代。仅复制压缩行情快照，不会调用iFinD，也不改写原始CPS2文件。
 
-## 数据结构
+成功后会自动执行 `scripts\verify_data.py`，可以另行双击 `VERIFY_ETF_SPY_DATA.bat` 验证。
 
-```text
-USERM/
-├── app.py
-├── requirements.txt
-├── REFRESH_FROM_LOCAL_DATA.bat
-├── START_USERM.bat
-├── data/
-│   ├── etfs.csv
-│   ├── etf_codes.csv
-│   ├── etf_prices.csv.gz
-│   └── snapshot_manifest.json
-├── scripts/
-│   └── refresh_data.py
-├── tests/
-│   ├── test_rotation.py
-│   └── test_etf_refresh.py
-└── userm/
-    ├── config.py
-    ├── data.py
-    ├── signals.py
-    └── ui.py
-```
-
-内置价格快照来自先前上传的旧数据，**截止2026-11-03，不是2026-11-10实时行情**。请用已有的本地最新收盘数据刷新后再手动上传GitHub。
-
-## 今后更新：只刷新ETF、不再同步股票数据
-
-这次重写了本项目自带的 `scripts/refresh_data.py`，它只读取本地已有的20只ETF CPS2数据、生成 `data/etf_prices.csv.gz`、`data/etf_codes.csv`、`data/snapshot_manifest.json`。**不读取或生成个股文件，不调用iFinD API**。
-
-1. 如果 `C:\code\DATA\US\data\cps2_adjusted` 已更新完毕，只需双击新包内的 `REFRESH_FROM_LOCAL_DATA.bat`。
-2. 可手动执行：
-
-```bat
-py -3.12 scripts\refresh_data.py --source "C:\code\DATA\US\data"
-```
-
-3. 刷新完成、终端显示 `SUCCESS: 20/20 ETFs` 后，仅上传以下文件到GitHub `main/data`：
+新版本将生成/更新以下**四个**文件：
 
 ```text
 data/etf_prices.csv.gz
+data/spy_prices.csv.gz
 data/etf_codes.csv
 data/snapshot_manifest.json
 ```
 
-**盘中保护**：刷新程序使用NYSE官方交易所日历（含美国节假日、提前收盘、夏令时）计算最近已收盘时点，另外加入90分钟缓冲。即使原始CPS2有当天盘中记录也会排除；还要求发布的最后一天20/20 ETF数据齐备，并拒绝用更旧快照覆盖当前快照。依赖 `exchange-calendars` 已列入 requirements.txt。
+`data/etfs.csv` 仍是固定的20只ETF定义，不会把SPY加入其中。
 
-**与原取数管理器的衔接**：现有 `US_DATA_MANAGER` 仍可负责采集本地CPS2行情，但请不要再使用旧版 `05_SYNC_ONLY_NO_API.bat` 把个股快照同步回这个ETF专用GitHub工程。改为运行上面的 **ETF-only刷新脚本**。如果每天原来是运行“取数+同步”一键程序，旧取数管理器的同步阶段仍可能重新创建个股文件；本项目未修改你Windows上原取数管理器的行为，建议采集与ETF快照刷新分开执行。
+## Streamlit本地与GitHub部署
 
-## 方法
-
-每只ETF以**同组其他ETF的等权日收益**构造同行基准（剔除本ETF）。11只行业和9只科技主题单独排名，**不进行大盘方向前置过滤**。
-
-```text
-ETF_n = adjusted_close(t) / adjusted_close(t-n) - 1
-Peer_n = peer_index(t) / peer_index(t-n) - 1
-Excess_n = ETF_n - Peer_n
-Rank_n = group rank(Excess_n, descending)
-RS = adjusted_ETF_close / own_peer_index
-X = 100 * exp( EMA14(log RS) - EMA36(log RS) )
-Y = 100 * X(t) / X(t-5)
-```
-
-X/Y以100分割四象限。RRG使用可解释的**自定义近似公式**，不是StockCharts专有JdK指标。不使用未来行情、缺失日不前向填补；历史数据不足时相应字段显示空值。详见 `METHODS_ROTATION.md`。
-
-## 测试
+运行：
 
 ```bat
-py -3.12 -m unittest discover -s tests -v
+py -3.12 -m streamlit run app.py
 ```
 
-测试范围：20 ETF、1–60日观察周期、历史截断无未来信息、缺日与过期价格、市场已收盘截止日（含提前收盘）、ETF-only快照的完备性检查。Streamlit浏览器端仍需在你的实际Windows/Cloud环境启动验证。
+GitHub 上传解压后的项目内容到仓库 `main` 根目录，主入口 `app.py`。**更新代码之后，务必将上述四个最新行情文件上传到`main/data`；仅上传代码会导致SPY相关RRG图缺数据。** Cloud无法访问你Windows电脑的C盘。
+
+从旧V1.4升级时，删除GitHub仓库中不再使用的旧文件：
+
+```text
+data/spx_prices.csv.gz
+scripts/import_spx.py
+scripts/compare_stockcharts_reference.py
+IMPORT_SPX_FROM_LOCAL_DATA.bat
+REFRESH_ETF_AND_SPX.bat
+data/stockcharts_reference_20261109_approx.csv
+```
+
+旧个股数据及持仓快照也不应保留（V1.3起已取消个股）。
+
+## SPY与StockCharts的关系
+
+- 之前的StockCharts截图使用 `$SPX`（标普500**价格指数**），而USERM V1.5使用 `SPY`（可交易、分红ETF）。两者不是同一个价格序列，其RRG坐标可能不同。
+- 如需横向对照，请先把StockCharts图表的Benchmark Symbol从`$SPX`改为`SPY`，并使用相同的日线和截至日期；但独立公开近似公式**也不保证等于专有JdK坐标**。
+- 图表横轴为 `100*SMA10(ETF/SPY)/SMA30(ETF/SPY)`，纵轴为`100*X/SMA9(X)`；旧14/36版本仍可切换。尾长=4表示最近点+此前4个日节点，不决定公式周期。
+- SPY与ETF同取iFinD标注CPS:2调整行情，其与StockCharts分红复权策略是否一致仍需进一步核验。
+
+## 测试与安全
+
+运行 `py -3.12 -m pytest -q`。测试包括盘中时点、感恩节提前收盘、SPY缺失、不一致日拒绝发布、基准变更和行情无未来数据等。此环境不含你电脑最新CPS2及SPY真实数据，需在你的本地刷新后执行数据验证。
+
+行情可能受iFinD授权条款约束，请确认GitHub仓库和Streamlit访问权限，勿将受限行情公开再分发。应用没有额外的内置访问密码。

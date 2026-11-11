@@ -44,41 +44,62 @@ def figstyle(fig, height=420):
     return fig
 
 def rotation_map(current: pd.DataFrame, trails: pd.DataFrame | None = None, english=False):
-    fig = go.Figure()
-    fig.add_hline(y=100, line_width=1, line_dash='dot', line_color='#8f9baa')
-    fig.add_vline(x=100, line_width=1, line_dash='dot', line_color='#8f9baa')
-    labels = {
-        'LEADING': 'Leading / 领先强化', 'WEAKENING': 'Weakening / 领先减弱',
-        'IMPROVING': 'Improving / 落后改善', 'LAGGING': 'Lagging / 落后持续',
-    }
-    for quadrant in ['LEADING', 'IMPROVING', 'WEAKENING', 'LAGGING']:
-        d = current[(current.quadrant == quadrant) & current.fresh]
-        if d.empty:
-            continue
-        fig.add_trace(go.Scatter(
-            x=d.rs_ratio, y=d.rs_momentum, mode='markers+text', name=labels[quadrant],
-            text=d.etf, textposition='top center', textfont=dict(size=11),
-            marker=dict(size=13, color={
-                'LEADING': '#207A65', 'IMPROVING': '#3478B0',
-                'WEAKENING': '#C48E43', 'LAGGING': '#B04A52'}[quadrant],
-                line=dict(width=1, color='#ffffff')),
-            customdata=d[['name_zh', 'rel_window']].to_numpy(),
-            hovertemplate='<b>%{text}</b> %{customdata[0]}<br>RS trend %{x:.2f}<br>RS momentum %{y:.2f}<br>Selected-period excess %{customdata[1]:+.2%}<extra></extra>'
-        ))
+    """Four tinted quadrants and latest-date-color trails (StockCharts-style)."""
+    colors = {'LEADING':'#21845f','IMPROVING':'#2767d0',
+              'WEAKENING':'#ca9327','LAGGING':'#df4039'}
+    backgrounds = {'LEADING':'rgba(69,167,92,0.19)',
+                   'IMPROVING':'rgba(64,90,213,0.17)',
+                   'WEAKENING':'rgba(235,188,72,0.18)',
+                   'LAGGING':'rgba(242,87,89,0.17)'}
+    valid=current[current.fresh].dropna(subset=['rs_ratio','rs_momentum'])
+    fig=go.Figure()
+    displayed = [valid[['rs_ratio','rs_momentum']]]
     if trails is not None and not trails.empty:
-        for symbol, group in trails.groupby('etf'):
-            group = group.dropna(subset=['rs_ratio', 'rs_momentum']).sort_values('date')
-            if len(group) < 2:
-                continue
-            fig.add_trace(go.Scatter(
-                x=group.rs_ratio, y=group.rs_momentum, mode='lines+markers',
-                name=f'{symbol} trail', line=dict(color='#8C1D28', width=2),
-                marker=dict(color='#8C1D28', size=4), opacity=.65, showlegend=False,
-                hovertemplate=symbol+' %{x:.2f}, %{y:.2f}<extra></extra>'
-            ))
-    fig.update_layout(xaxis_title='Relative strength trend (100=neutral)',
-                      yaxis_title='Relative momentum (100=neutral)')
-    return figstyle(fig, 570)
+        displayed += [trails[['rs_ratio','rs_momentum']].dropna()]
+    values = pd.concat(displayed, ignore_index=True).replace([float('inf'),float('-inf')],float('nan')).dropna()
+    if values.empty:
+        return figstyle(fig, 590)
+    xmin = min(98.5,float(values.rs_ratio.min()))
+    xmax = max(101.5,float(values.rs_ratio.max()))
+    ymin = min(99.5,float(values.rs_momentum.min()))
+    ymax = max(100.5,float(values.rs_momentum.max()))
+    dx = max(0.6,(xmax-xmin)*0.08); dy = max(0.2,(ymax-ymin)*0.12)
+    xmin-=dx; xmax+=dx; ymin-=dy; ymax+=dy
+    for quad,x0,x1,y0,y1 in [
+        ('IMPROVING',xmin,100,100,ymax),('LEADING',100,xmax,100,ymax),
+        ('LAGGING',xmin,100,ymin,100),('WEAKENING',100,xmax,ymin,100)]:
+        if x1 > x0 and y1 > y0:
+            fig.add_shape(type='rect',x0=x0,x1=x1,y0=y0,y1=y1,
+                          line=dict(width=0),fillcolor=backgrounds[quad],layer='below')
+    fig.add_hline(y=100,line_width=1.3,line_color='#333d48')
+    fig.add_vline(x=100,line_width=1.3,line_color='#333d48')
+    for name,xx,yy,anchor in [
+        ('Improving',xmin+dx*.5,ymax-dy*.5,'left'),
+        ('Leading',xmax-dx*.5,ymax-dy*.5,'right'),
+        ('Lagging',xmin+dx*.5,ymin+dy*.5,'left'),
+        ('Weakening',xmax-dx*.5,ymin+dy*.5,'right')]:
+        q=name.upper()
+        fig.add_annotation(x=xx,y=yy,text=f'<b>{name}</b>',showarrow=False,
+                           xanchor=anchor,font=dict(color=colors[q],size=16))
+    for _,row in valid.iterrows():
+        code=row.etf; quad=row.quadrant; color=colors.get(quad,'#9299a3')
+        if trails is not None and not trails.empty:
+            track=trails[trails.etf==code].sort_values('date').dropna(subset=['rs_ratio','rs_momentum'])
+            if len(track)>1:
+                fig.add_trace(go.Scatter(
+                    x=track.rs_ratio,y=track.rs_momentum,
+                    mode='lines+markers',showlegend=False,name=f'{code} trail',
+                    line=dict(color=color,width=2.5),marker=dict(color=color,size=5),
+                    customdata=track.date.dt.strftime('%Y-%m-%d'),
+                    hovertemplate=f'{code} %{{customdata}}<br>X %{{x:.2f}}<br>Y %{{y:.2f}}<extra></extra>'))
+        fig.add_trace(go.Scatter(
+            x=[row.rs_ratio],y=[row.rs_momentum],mode='markers+text',
+            text=[code],textposition='middle right',showlegend=False,
+            marker=dict(size=12,color=color,line=dict(width=1,color='#fff')),
+            hovertemplate=f'<b>{code}</b><br>X %{{x:.2f}}<br>Y %{{y:.2f}}<extra></extra>'))
+    fig.update_xaxes(title_text='RRG-style RS-Ratio (100 = neutral)',range=[xmin,xmax])
+    fig.update_yaxes(title_text='RRG-style RS-Momentum (100 = neutral)',range=[ymin,ymax])
+    return figstyle(fig,610)
 
 def price_chart(chart_data: pd.DataFrame, symbol: str, observation_days: int):
     g = chart_data.copy()

@@ -155,73 +155,155 @@ def make_snapshot(source: Source, cutoff: str):
     return mapped, all_rows, info
 
 
-def publish(mapped: dict, rows: list, info: dict, cutoff: str, source_type: str):
+def make_spy_snapshot(source: Source, cutoff: str, etf_latest: str,
+                      explicit_symbol: str | None = None):
+    """Read genuine SPY ETF prices from the same CPS2 directory as the 20 ETFs.
+
+    The latest SPY bar MUST match the last complete 20/20 ETF session.  A
+    stale/missing benchmark is an error, not permission to silently switch
+    to an ETF20 benchmark or publish misaligned RRG coordinates.
+    """
+    symbol = (explicit_symbol or source.resolve('SPY')).strip().upper()
+    if not symbol or symbol.rsplit('.', 1)[0] != 'SPY':
+        raise ValueError('SPY source missing/ambiguous: ensure SPY.P or another SPY exchange '
+                         'code exists under cps2_adjusted, or use --spy-symbol SPY.P')
+    if isinstance(source, Source) and not any(k[0] == symbol for k in source.by_file):
+        raise FileNotFoundError(f'SPY source ticker {symbol} not present in CPS2')
+    keyed = {}
+    invalid = 0
+    for raw, partition in source.iter_bars(symbol):
+        try:
+            dt = str(raw['date']).strip()[:10]
+            parsed = datetime.strptime(dt, '%Y-%m-%d')
+            if parsed.year < 2020 or dt > cutoff or dt > etf_latest:
+                continue
+            close = float(raw['close'])
+            if not (0 < close < float('inf')):
+                raise ValueError('Invalid SPY close')
+            keyed[dt] = {
+                'date': dt, 'close': close, 'symbol': symbol,
+                'partition': partition,
+            }
+        except (KeyError, TypeError, ValueError, OverflowError):
+            invalid += 1
+    rows = [keyed[d] for d in sorted(keyed)]
+    if len(rows) < 50:
+        raise RuntimeError(f'SPY only has {len(rows)} valid historical bars; at least 50 required')
+    latest = rows[-1]['date']
+    if latest != etf_latest:
+        raise RuntimeError(f'SPY latest {latest} != latest complete 20-ETF session '
+                           f'{etf_latest}; refusing to publish misaligned snapshots')
+    return rows, {
+        'symbol': symbol, 'rows': len(rows), 'invalid_rows': invalid,
+        'min_date': rows[0]['date'], 'max_date': latest,
+    }
+
+
+def publish(mapped: dict, rows: list, info: dict, cutoff: str, source_type: str,
+            spy_rows: list, spy_info: dict):
+    """Stage and verify all four data files; restore backups if publishing fails."""
     DATA.mkdir(parents=True, exist_ok=True)
-    snapshot_path = DATA / 'etf_prices.csv.gz'
-    mapping_path = DATA / 'etf_codes.csv'
-    manifest_path = DATA / 'snapshot_manifest.json'
+    if spy_info['max_date'] != info['max_date']:
+        raise RuntimeError('SPY and ETF end dates must agree')
+    paths = {name: DATA/name for name in
+             ('etf_prices.csv.gz','spy_prices.csv.gz','etf_codes.csv','snapshot_manifest.json')}
     existing = {}
-    if manifest_path.exists():
-        existing = json.loads(manifest_path.read_text(encoding='utf-8'))
-    old_latest = existing.get('etfs',{}).get('max_date','')
-    if old_latest and info['max_date'] < old_latest:
-        raise RuntimeError(f'New snapshot ends {info["max_date"]}, before existing {old_latest}; refusing downgrade')
+    if paths['snapshot_manifest.json'].exists():
+        existing = json.loads(paths['snapshot_manifest.json'].read_text(encoding='utf-8'))
+    old_dates = [existing.get('etfs',{}).get('max_date',''),
+                 existing.get('spy',{}).get('max_date','')]
+    # Check existing SPY file as well; legacy manifest may not record it.
+    if paths['spy_prices.csv.gz'].exists():
+        old = pd.read_csv(paths['spy_prices.csv.gz'], usecols=['date'])
+        old_dates.append(str(old.date.max()))
+    for old_last in old_dates:
+        if old_last and info['max_date'] < old_last:
+            raise RuntimeError(f'New snapshot ends {info["max_date"]}, before existing '
+                               f'{old_last}; refusing downgrade')
     manifest = {
-        'name':'USERM 20 ETF only snapshot',
-        'schema':'USERM-ETF-v1',
-        'generated_utc':datetime.now(timezone.utc).isoformat(),
-        'source':'preexisting local CPS:2 daily files; no iFinD API calls',
-        'source_path_type':source_type,
-        'adjustment':'CPS:2 as labeled by source; total return handling not independently verified',
-        'universe':'11 sector ETFs and 9 tech-theme ETFs; no individual stocks',
-        'last_safe_nyse_session':cutoff,
-        'published_last_complete_etf_session':info['max_date'],
-        'etfs':info,
-        'warnings':[]}
-    # Stage then replace. Existing data stays unchanged if parsing fails.
-    stage_dir = Path(tempfile.mkdtemp(prefix='.userm_etf_',dir=DATA))
+        'name': 'USERM 20 ETF + SPY benchmark EOD snapshot',
+        'schema': 'USERM-ETF-SPY-v1',
+        'generated_utc': datetime.now(timezone.utc).isoformat(),
+        'source': 'preexisting local CPS:2 adjusted daily files; no iFinD API calls',
+        'source_path_type': source_type,
+        'adjustment': 'CPS:2 per source; dividend / total-return comparability not independently verified',
+        'universe': '20 target ETFs; SPY is ONLY RRG benchmark, excluded from ranks',
+        'rrg_benchmark': 'SPY',
+        'last_safe_nyse_session': cutoff,
+        'published_last_complete_21_session': info['max_date'],
+        'etfs': info,
+        'spy': spy_info,
+        'warnings': [],
+    }
+    stage_dir = Path(tempfile.mkdtemp(prefix='.userm_etf_spy_', dir=DATA))
     try:
-        new_quotes = stage_dir / 'etf_prices.csv.gz'
-        with gzip.open(new_quotes,'wt',encoding='utf-8',newline='',compresslevel=3) as handle:
-            writer = csv.DictWriter(handle,fieldnames=COLUMNS,lineterminator='\n')
+        etf_stage = stage_dir / 'etf_prices.csv.gz'
+        with gzip.open(etf_stage,'wt',encoding='utf-8',newline='',compresslevel=3) as handle:
+            writer=csv.DictWriter(handle, fieldnames=COLUMNS, lineterminator='\n')
             writer.writeheader(); writer.writerows(rows)
-        new_codes = stage_dir / 'etf_codes.csv'
-        with new_codes.open('w',encoding='utf-8-sig',newline='') as handle:
-            writer = csv.writer(handle);writer.writerow(['etf','symbol'])
-            writer.writerows(sorted(mapped.items()))
-        new_manifest = stage_dir / 'snapshot_manifest.json'
-        new_manifest.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
-        # Verify staged gzip and full ticker mapping before replacing files.
-        with gzip.open(new_quotes,'rt',encoding='utf-8') as handle:
-            n = sum(1 for _ in handle) - 1
-        if n != info['rows'] or len(mapped) != 20 or info['symbols_found'] != 20:
-            raise RuntimeError('Staged ETF snapshot validation failed')
-        os.replace(new_quotes,snapshot_path)
-        os.replace(new_codes,mapping_path)
-        os.replace(new_manifest,manifest_path)
+        spy_stage = stage_dir / 'spy_prices.csv.gz'
+        with gzip.open(spy_stage,'wt',encoding='utf-8',newline='',compresslevel=3) as handle:
+            writer=csv.DictWriter(handle,fieldnames=['date','close'],lineterminator='\n')
+            writer.writeheader(); writer.writerows([{'date':r['date'],'close':r['close']} for r in spy_rows])
+        code_stage=stage_dir/'etf_codes.csv'
+        with code_stage.open('w',encoding='utf-8-sig',newline='') as handle:
+            writer=csv.writer(handle); writer.writerow(['etf','symbol']); writer.writerows(sorted(mapped.items()))
+        manifest_stage=stage_dir/'snapshot_manifest.json'
+        manifest_stage.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+        with gzip.open(etf_stage,'rt',encoding='utf-8') as handle:
+            etf_n=sum(1 for _ in handle)-1
+        check_spy=pd.read_csv(spy_stage)
+        if (etf_n != info['rows'] or len(mapped)!=20 or info['symbols_found'] != 20
+                or len(check_spy) != spy_info['rows']
+                or str(check_spy.date.iloc[-1]) != info['max_date']):
+            raise RuntimeError('ETF/SPY staged snapshot verification failed')
+        # Replace all as a group. If one rename fails, restore the prior set.
+        backup = stage_dir / 'previous'
+        backup.mkdir()
+        replaced = []
+        for name, dest in paths.items():
+            if dest.exists():
+                import shutil
+                shutil.copy2(dest, backup/name)
+        try:
+            for name, dest in paths.items():
+                os.replace(stage_dir/name, dest)
+                replaced.append(name)
+        except Exception:
+            for name in reversed(replaced):
+                restore = backup/name
+                if restore.exists():
+                    os.replace(restore, paths[name])
+                else:
+                    paths[name].unlink(missing_ok=True)
+            raise
     finally:
         import shutil
         shutil.rmtree(stage_dir, ignore_errors=True)
-    print(f'SUCCESS: {info["symbols_found"]}/20 ETFs, {info["rows"]:,} bars, '
-          f'{info["min_date"]} -> {info["max_date"]}, NYSE safe cutoff {cutoff}')
-    print('Upload to GitHub main/data:',snapshot_path.name,mapping_path.name,manifest_path.name)
+    print(f'SUCCESS: 20 ETF + SPY; ETF bars {info["rows"]:,}; '
+          f'SPY bars {spy_info["rows"]:,}; latest COMPLETE {info["max_date"]}; '
+          f'safe NYSE cutoff {cutoff}')
+    print('Upload all to GitHub main/data: etf_prices.csv.gz, spy_prices.csv.gz, '
+          'etf_codes.csv, snapshot_manifest.json')
 
 
 def run(opts):
-    # Critical: determine the *live* cutoff before inspecting raw snapshots.
     cutoff = last_safe_session()
     source = Source(Path(opts.source) if opts.source else None,
                     Path(opts.cps2_zip) if opts.cps2_zip else None)
     try:
         mapped, rows, info = make_snapshot(source, cutoff)
+        spy_rows, spy_info = make_spy_snapshot(source, cutoff, info['max_date'],
+                                               getattr(opts,'spy_symbol',None))
     finally:
         source.close()
-    publish(mapped,rows,info,cutoff,'archive' if opts.cps2_zip else 'local directory')
-
+    publish(mapped, rows, info, cutoff, 'archive' if opts.cps2_zip else 'local directory',
+            spy_rows, spy_info)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--source',help=r'C:\code\DATA\US\data (contains cps2_adjusted/train & oos)')
     group.add_argument('--cps2-zip',help='Existing local CPS:2 zip archive')
+    parser.add_argument('--spy-symbol',help='Exact ticker if multiple SPY exchange suffixes (e.g. SPY.P)')
     run(parser.parse_args())
