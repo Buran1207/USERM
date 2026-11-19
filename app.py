@@ -11,6 +11,8 @@ import streamlit as st
 
 from userm.benchmarks import load_spy
 from userm.data import load_quotes, load_etf_master, manifest, table
+from userm.config import DATA
+from scripts.refresh_data import last_safe_session
 from userm.rrg import (RRG_SMA, RRG_LEGACY, METHOD_LABELS,
                        attach_common_rrg)
 from userm.signals import calculate_etf_signals, latest_table, window_series
@@ -22,7 +24,7 @@ st.markdown(CSS, unsafe_allow_html=True)
 
 
 @st.cache_data(show_spinner=False)
-def cached_etfs():
+def cached_etfs(snapshot_version):
     master = load_etf_master()
     quotes = load_quotes('etfs')
     return calculate_etf_signals(quotes, master), master, quotes
@@ -45,7 +47,9 @@ def show_records(data: pd.DataFrame, columns: dict, pct_cols=(), round_cols=(), 
 
 
 try:
-    base_signals, master, quotes = cached_etfs()
+    revision = tuple((DATA / name).stat().st_mtime_ns for name in (
+        "etf_prices.csv.gz", "etfs.csv", "snapshot_manifest.json"))
+    base_signals, master, quotes = cached_etfs(revision)
     spy = load_spy()
 except Exception as error:
     st.error(f'行情加载失败 / Unable to load ETF or benchmark: {error}')
@@ -84,11 +88,12 @@ with st.sidebar:
     tail_length = st.slider('轨迹尾长 / Prior trading days', 1, 40, 4, 1,
                             help='显示之前N个交易日+当前点；不改变RS-Ratio或RS-Momentum。')
     if spy is None:
-        st.warning('缺少 data/spy_prices.csv.gz。请先运行 REFRESH_ETF_AND_SPY.bat；RRG暂不显示数值，不使用其他ETF代替SPY。')
+        st.warning('缺少 data/spy_prices.csv.gz。请检查云端行情更新；RRG暂不显示数值，不使用其他ETF代替SPY。')
     else:
         st.caption(f'SPY EOD: {spy.index.min().date()} — {spy.index.max().date()}')
     st.caption(f'ETF latest: {latest.date()}')
-    st.caption('离线EOD数据，无自动行情下载，禁止盘中未完成K线。')
+    st.caption(f"行情来源 / Source: {quality.get('source', '未知')}")
+    st.caption('云端EOD快照，禁止盘中未完成K线。')
 
 # SPY is intentionally excluded from the 20-ETF target universe and rankings.
 bench = spy.rename('close') if spy is not None else pd.Series(dtype=float, name='close')
@@ -111,10 +116,17 @@ st.markdown('<div class="tag">USERM | 20 ETF RELATIVE ROTATION</div>', unsafe_al
 st.title(tt(page, english))
 st.caption(f'20 ETF · EOD {asof:%Y-%m-%d} · Performance window {period} sessions · '
            f'RRG Daily / Tail {tail_length} / benchmark {benchmark_label} · No ML')
-if asof == latest and (pd.Timestamp.today().normalize() - latest).days > 7:
-    st.warning('ETF行情距离当前日期超过7天，请先使用本地数据更新程序。')
+if asof == latest:
+    try:
+        expected = pd.Timestamp(last_safe_session(buffer_minutes=20))
+        if latest < expected:
+            st.warning(f'行情尚未更新至最新已完成交易日 {expected.date()}；当前显示 {latest.date()} 的历史快照。')
+        if spy is None or spy.index.max() != latest:
+            st.error('SPY与ETF行情日期不一致；请检查云端更新日志。')
+    except Exception as exc:
+        st.warning(f'无法确认最新交易日：{exc}')
 if spy is None:
-    st.warning('SPY基准未导入，ETF组内收益和排名正常；RRG坐标暂不可用。请从本地CPS2刷新21只标的。')
+    st.warning('SPY基准未导入，ETF组内收益和排名正常；RRG坐标暂不可用。请检查21只标的的云端更新日志。')
 elif asof not in spy.index:
     st.warning('研究日缺少SPY收盘记录，RRG不会沿用上一日SPY收盘价。')
 
@@ -169,7 +181,7 @@ elif page == 'ETF轮动地图':
             '默认公开近似X=100×SMA10(RS)/SMA30(RS)，Y=100×X/SMA9(X)。'
             '该方法并非官方JdK算法；尾长不影响计算，3个月只影响显示范围。')
     if spy is None:
-        st.warning('当前没有SPY数据，不能计算RRG坐标。请先在本地刷新，再上传 data/spy_prices.csv.gz。')
+        st.warning('当前没有SPY数据，不能计算RRG坐标。请检查云端更新日志及 data/spy_prices.csv.gz。')
     # Reference benchmark sparkline: last 3 calendar months, not calculation history.
     preview = bench.loc[(bench.index <= asof) & (bench.index >= asof-pd.DateOffset(months=3))].dropna()
     if not preview.empty:
@@ -222,13 +234,13 @@ elif page == '方法与数据质量':
         cols[3].metric('最新交易日', str(e.get('max_date', latest.date())))
         st.caption(f"Snapshot generated UTC: {quality.get('generated_utc','?')}")
     if spy is None:
-        st.warning('尚无SPY历史。请先运行 REFRESH_ETF_AND_SPY.bat 生成 data/spy_prices.csv.gz。')
+        st.warning('尚无SPY历史。请检查云端更新日志及 data/spy_prices.csv.gz。')
     else:
         st.success(f'SPY ETF EOD history {len(spy):,} bars: '
                    f'{spy.index.min().date()} to {spy.index.max().date()}')
     st.dataframe(snapshot[['etf','date','age_sessions','fresh','peer_count','partition',
                            'rvol_20','rotation_rank']], use_container_width=True, hide_index=True)
-    st.markdown('''1. 数据为iFinD标注CPS:2的调整价格，是否与StockCharts价格复权处理完全一致尚未核验。\n
+    st.markdown('''1. 数据供应商与前复权口径以 snapshot_manifest.json 为准；与 StockCharts、iFinD 的精确一致性未核验。\n
 2. `data/spy_prices.csv.gz` 必须为SPY ETF真实日线行情，与20只ETF同一复权口径。\n
 3. 缺失ETF或SPY的收盘日不填充、不使用未完成交易日。\n
 4. 不引入个股、机器学习、反转分级、历史事件胜率或自动交易。''')

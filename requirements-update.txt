@@ -1,0 +1,4 @@
+pandas>=2.2,<3
+numpy>=1.26,<3
+exchange-calendars>=4.11,<5
+yfinance>=0.2.65,<2

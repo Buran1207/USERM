@@ -31,18 +31,17 @@ def verify() -> None:
         raise RuntimeError('Some of 20 ETF tickers have older latest bars')
     if spy.index.max()!=latest:
         raise RuntimeError(f'SPY latest {spy.index.max().date()} != ETFs {latest.date()}')
-    safe=pd.Timestamp(last_safe_session())
+    meta=manifest()
+    safe=pd.Timestamp(last_safe_session(buffer_minutes=int(meta.get('eod_buffer_minutes',90))))
     if latest>safe:
         raise RuntimeError(f'Unsafe intraday bar {latest.date()} beyond safe close {safe.date()}')
-    meta=manifest()
     if meta.get('rrg_benchmark')!='SPY':
         raise RuntimeError('Manifest RRG benchmark not SPY; did you run the new refresh?')
     if str(meta.get('published_last_complete_21_session'))!=str(latest.date()):
         raise RuntimeError('Manifest date mismatches data date')
     print(f'PASS: 20 ETF tickers, {len(prices):,} ETF bars, '
           f'SPY {len(spy):,} bars, aligned EOD {latest.date()}')
-    print('Upload four files: data/etf_prices.csv.gz, data/spy_prices.csv.gz, '
-          'data/etf_codes.csv, data/snapshot_manifest.json')
+    print('ETF/SPY local snapshot verification complete.')
 
 
 if __name__=='__main__':

@@ -210,6 +210,8 @@ def publish(mapped: dict, rows: list, info: dict, cutoff: str, source_type: str,
     existing = {}
     if paths['snapshot_manifest.json'].exists():
         existing = json.loads(paths['snapshot_manifest.json'].read_text(encoding='utf-8'))
+        if existing.get('source') == 'Yahoo Finance via yfinance':
+            raise RuntimeError('Public-source snapshot active; legacy CPS2 updater disabled to prevent accidental source mixing.')
     old_dates = [existing.get('etfs',{}).get('max_date',''),
                  existing.get('spy',{}).get('max_date','')]
     # Check existing SPY file as well; legacy manifest may not record it.

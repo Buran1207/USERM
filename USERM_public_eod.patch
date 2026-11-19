@@ -1,0 +1,525 @@
+diff --git a/.github/workflows/update-public-eod.yml b/.github/workflows/update-public-eod.yml
+new file mode 100644
+index 0000000..55751f2
+--- /dev/null
++++ b/.github/workflows/update-public-eod.yml
+@@ -0,0 +1,45 @@
++name: USERM public EOD refresh
++on:
++  workflow_dispatch:
++  schedule:
++    # UTC Mon-Fri; Beijing next morning 04:23, 04:43, 05:23, 05:43, 06:23 and 07:23.
++    - cron: '23,43 20,21 * * 1-5'
++    - cron: '23 22,23 * * 1-5'
++permissions:
++  contents: write
++concurrency:
++  group: userm-public-eod-${{ github.ref }}
++  cancel-in-progress: false
++jobs:
++  update:
++    if: github.ref == 'refs/heads/main'
++    runs-on: ubuntu-latest
++    timeout-minutes: 13
++    env:
++      USERM_DATA_AUTHORIZED: ${{ vars.USERM_DATA_AUTHORIZED }}
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 1
++      - name: Confirm data usage and publication rights
++        run: |
++          if [ "$USERM_DATA_AUTHORIZED" != yes ]; then
++            echo '::error::Set repository variable USERM_DATA_AUTHORIZED=yes only after verifying data rights.'
++            exit 1
++          fi
++      - uses: actions/setup-python@v5
++        with:
++          python-version: '3.12'
++          cache: pip
++          cache-dependency-path: requirements-update.txt
++      - run: python -m pip install -r requirements-update.txt
++      - run: python scripts/refresh_public.py
++      - name: Publish complete snapshot as a single Git commit
++        run: |
++          git add data/etf_prices.csv.gz data/spy_prices.csv.gz data/snapshot_manifest.json data/spy_snapshot_manifest.json
++          if git diff --cached --quiet; then exit 0; fi
++          git config user.name 'github-actions[bot]'
++          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
++          git commit -m "data: USERM verified public EOD snapshot"
++          # No force-push: a concurrent main change fails safely; next timer retries.
++          git push origin HEAD:main
+diff --git a/PUBLIC_DATA_SETUP.md b/PUBLIC_DATA_SETUP.md
+new file mode 100644
+index 0000000..d8d644f
+--- /dev/null
++++ b/PUBLIC_DATA_SETUP.md
+@@ -0,0 +1,51 @@
++# USERM V1.5 · Public EOD 数据更新补丁
++
++本补丁仅基于原 V1.5 数据层与 UI 数据状态进行改造。核心 `userm/rrg.py`、`userm/signals.py`、`userm/data.py`、`userm/benchmarks.py` 未修改。保留原 ETF 代码、SPY、TRAIN/OOS 界线和原 ETF master。旧数据是 2026-11-17 的 CPS2 快照，首次成功迁移前保持旧数据并显示来源；没有生成或假称已经下载 Yahoo 真行情。
++
++## 1. 数据来源与权限（必读）
++Yahoo Finance/yfinance 是技术可行性验证路径，不是已获商用及再分发许可的正式行情源。当前 GitHub 为公开仓库；自动化抓取、保存、向公开仓库及 Streamlit 展示市场数据所需权利必须先取得。不要将变量 `USERM_DATA_AUTHORIZED=yes` 当作许可证。若无法取得授权，改用允许这些用途的授权行情供应商（需适配数据获取层）；本补丁没有实现第二供应商，也未验证任何供应商的合同授权。即使私有仓库也不能自动消除商用许可问题。
++- Yahoo 条款：https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html
++- yfinance：https://github.com/ranaroussi/yfinance
++
++## 2. 一次性部署（建议使用补丁，不覆盖整个 GitHub）
++当前 GitHub 连接仅可读，未修改线上仓库。使用有写权限的 GitHub 账户在本机 Git Bash 或 PowerShell 执行：
++
++```powershell
++cd C:\code
++# 若已有 USERM git 工作树，则直接 cd 至该目录并 git pull --ff-only；不要覆盖个人修改。
++git clone https://github.com/Buran1207/USERM.git USERM_public_deploy
++cd USERM_public_deploy
++git status --short
++# 解压补丁 ZIP 到任意目录，下面改为其真实绝对路径。
++git apply --check "C:\你的解压目录\USERM_public_eod.patch"
++git apply "C:\你的解压目录\USERM_public_eod.patch"
++git status --short
++git add app.py scripts/refresh_data.py scripts/verify_data.py scripts/refresh_public.py tests/test_public_refresh.py requirements-update.txt .github/workflows/update-public-eod.yml PUBLIC_DATA_SETUP.md
++git commit -m "USERM: public EOD adapter and cloud scheduler"
++git push origin main
++```
++若 `git apply --check` 不通过（仓库有新版/本地修改），不要强行覆盖；先审阅变更合并。`git push` 必须用有仓库写权限和 workflow 修改权限的账号。保留 repo 当前额外模块、文档、data 文件等；不上传原 ZIP 里的 data.zip 或 __pycache__。
++
++取得适用的数据使用及公开再分发许可之后，进入仓库 Settings > Secrets and variables > Actions > Variables，新建 `USERM_DATA_AUTHORIZED` 值 `yes`。确认 Actions 已启用，仓库策略允许 `GITHUB_TOKEN` contents:write，main 允许 GitHub Actions 提交。首次可在 Actions > USERM public EOD refresh > Run workflow 手动验证一次。每日任务从此不需开电脑；未许可则不启用该变量。若使用机构授权替代供应商，请先改适配器及授权控制，不要用 Yahoo 变量绕过条款。
++
++## 3. 调度
++NYSE 正常收盘：北京时间夏季 04:00、冬季 05:00。实际交易日历决定安全截止，收盘+20分钟才读取；提前收盘和节假日按 XNYS。UTC 周一至周五 20:23、20:43、21:23、21:43（北京时间次日 04:23/04:43/05:23/05:43），另有 22:23、23:23 UTC 补救（北京时间 06:23/07:23）。每个 job 最多 13 分钟。若已有当日完整 Yahoo 哈希快照，快速跳过。目标 06:00 前完成，不是服务等级保证；GitHub 排队、数据源延迟或封锁、校验失败都可能延后，后续补救失败会保留旧数据，日志标明失败。GitHub public repo 60 天无活动可能停用 schedule；正常日提交会产生仓库活动，但仍需关注异常。
++
++## 4. 前复权与数据质量
++每次完整下载 2020-01-01 起 21 个独立 ticker（实际上市日期开始），不用 EPS/财务字段，不拼接 CPS2。利用 Yahoo 原始返回的 Close 与 Adj Close：f_t=AdjClose_t/Close_t，OHLC_new_t=OHLC_t*f_t/f_T。最后一个安全交易日价格与 Yahoo Close 一致；Yahoo Close 已作拆股处理，股息通过调整比例纳入。成交量按供应商返回，不二次复权。不同供应商口径并非逐条相等，不把新历史回测视作原回测的完全复现。保留旧历史日期覆盖，不补齐 ETF 成立前价格，不用 forward fill，不填造零值，不接受缺少当日 bar。历史日期校验以 NYSE 为基础，如供应商历史确有中断需要人工审查，不能凭空补齐。记录新旧重叠区间收益差异（bp）、SHA256、数据来源、覆盖数和最新交易日。
++
++任何一个标的失败（包括 SPY），全部保留上次快照；校验后四个文件生成一组提交。旧本地 CPS2 更新器在 Yahoo 已发布后拒绝覆盖，防止混用。原有静态 AUM/持仓日期未改；不属于行情自动更新范围。Streamlit 从仓库读取 EOD 快照，不在页面发出行情 API 请求；日期/文件修改时间驱动缓存刷新，在页面中显示落后最新已完成交易日的警告。保持原 Streamlit 部署指向 Buran1207/USERM/main/app.py，不需要换网址。已经打开的页面可能需自动 rerun 或重新载入。
++
++## 5. 检查及状态
++- 原 ZIP 和新测试共 26 个 pytest 通过（历史行情和模拟 Yahoo 返回，不是网络实测）。
++- 原 RRG、signals、data、benchmarks 文件字节未改；原数据校验 PASS（32002 ETF 行，1729 SPY 行，截至 2026-11-17）。
++- 当前运行环境无法访问 Yahoo/GitHub git 网络；GitHub 连接仅有 pull，无 push 权限；未验证实际 Yahoo 21 标的实时取数或 Streamlit 实际部署。不承诺 06:00 之前绝对完成。
++- 上线后检查 Actions 日志 `[SUCCESS]`、`data/snapshot_manifest.json` 中 `source`、`published_last_complete_21_session` 和 `sha256`、Streamlit 侧边栏最新日期。首次运行前取得许可。若出现 Yahoo 数据缺失或源口径差异较大，应核查后再用于真实投资。
++
++本地仅在已有使用权限的情况下可测试：
++```powershell
++python -m pip install -r requirements-update.txt
++python scripts/refresh_public.py
++python scripts/verify_data.py
++```
++不需要 Windows 任务计划，不依赖 iFinD 日常取数。若希望旧本地 C:\code\DATA\US 路径也同步，本补丁不含本机同步；云端更新不需要本地文件。
+diff --git a/app.py b/app.py
+index 9990fda..e1f61c3 100644
+--- a/app.py
++++ b/app.py
+@@ -11,6 +11,8 @@ import streamlit as st
+ 
+ from userm.benchmarks import load_spy
+ from userm.data import load_quotes, load_etf_master, manifest, table
++from userm.config import DATA
++from scripts.refresh_data import last_safe_session
+ from userm.rrg import (RRG_SMA, RRG_LEGACY, METHOD_LABELS,
+                        attach_common_rrg)
+ from userm.signals import calculate_etf_signals, latest_table, window_series
+@@ -22,7 +24,7 @@ st.markdown(CSS, unsafe_allow_html=True)
+ 
+ 
+ @st.cache_data(show_spinner=False)
+-def cached_etfs():
++def cached_etfs(snapshot_version):
+     master = load_etf_master()
+     quotes = load_quotes('etfs')
+     return calculate_etf_signals(quotes, master), master, quotes
+@@ -45,7 +47,9 @@ def show_records(data: pd.DataFrame, columns: dict, pct_cols=(), round_cols=(),
+ 
+ 
+ try:
+-    base_signals, master, quotes = cached_etfs()
++    revision = tuple((DATA / name).stat().st_mtime_ns for name in (
++        "etf_prices.csv.gz", "etfs.csv", "snapshot_manifest.json"))
++    base_signals, master, quotes = cached_etfs(revision)
+     spy = load_spy()
+ except Exception as error:
+     st.error(f'行情加载失败 / Unable to load ETF or benchmark: {error}')
+@@ -84,11 +88,12 @@ with st.sidebar:
+     tail_length = st.slider('轨迹尾长 / Prior trading days', 1, 40, 4, 1,
+                             help='显示之前N个交易日+当前点；不改变RS-Ratio或RS-Momentum。')
+     if spy is None:
+-        st.warning('缺少 data/spy_prices.csv.gz。请先运行 REFRESH_ETF_AND_SPY.bat；RRG暂不显示数值，不使用其他ETF代替SPY。')
++        st.warning('缺少 data/spy_prices.csv.gz。请检查云端行情更新；RRG暂不显示数值，不使用其他ETF代替SPY。')
+     else:
+         st.caption(f'SPY EOD: {spy.index.min().date()} — {spy.index.max().date()}')
+     st.caption(f'ETF latest: {latest.date()}')
+-    st.caption('离线EOD数据，无自动行情下载，禁止盘中未完成K线。')
++    st.caption(f"行情来源 / Source: {quality.get('source', '未知')}")
++    st.caption('云端EOD快照，禁止盘中未完成K线。')
+ 
+ # SPY is intentionally excluded from the 20-ETF target universe and rankings.
+ bench = spy.rename('close') if spy is not None else pd.Series(dtype=float, name='close')
+@@ -111,10 +116,17 @@ st.markdown('<div class="tag">USERM | 20 ETF RELATIVE ROTATION</div>', unsafe_al
+ st.title(tt(page, english))
+ st.caption(f'20 ETF · EOD {asof:%Y-%m-%d} · Performance window {period} sessions · '
+            f'RRG Daily / Tail {tail_length} / benchmark {benchmark_label} · No ML')
+-if asof == latest and (pd.Timestamp.today().normalize() - latest).days > 7:
+-    st.warning('ETF行情距离当前日期超过7天，请先使用本地数据更新程序。')
++if asof == latest:
++    try:
++        expected = pd.Timestamp(last_safe_session(buffer_minutes=20))
++        if latest < expected:
++            st.warning(f'行情尚未更新至最新已完成交易日 {expected.date()}；当前显示 {latest.date()} 的历史快照。')
++        if spy is None or spy.index.max() != latest:
++            st.error('SPY与ETF行情日期不一致；请检查云端更新日志。')
++    except Exception as exc:
++        st.warning(f'无法确认最新交易日：{exc}')
+ if spy is None:
+-    st.warning('SPY基准未导入，ETF组内收益和排名正常；RRG坐标暂不可用。请从本地CPS2刷新21只标的。')
++    st.warning('SPY基准未导入，ETF组内收益和排名正常；RRG坐标暂不可用。请检查21只标的的云端更新日志。')
+ elif asof not in spy.index:
+     st.warning('研究日缺少SPY收盘记录，RRG不会沿用上一日SPY收盘价。')
+ 
+@@ -169,7 +181,7 @@ elif page == 'ETF轮动地图':
+             '默认公开近似X=100×SMA10(RS)/SMA30(RS)，Y=100×X/SMA9(X)。'
+             '该方法并非官方JdK算法；尾长不影响计算，3个月只影响显示范围。')
+     if spy is None:
+-        st.warning('当前没有SPY数据，不能计算RRG坐标。请先在本地刷新，再上传 data/spy_prices.csv.gz。')
++        st.warning('当前没有SPY数据，不能计算RRG坐标。请检查云端更新日志及 data/spy_prices.csv.gz。')
+     # Reference benchmark sparkline: last 3 calendar months, not calculation history.
+     preview = bench.loc[(bench.index <= asof) & (bench.index >= asof-pd.DateOffset(months=3))].dropna()
+     if not preview.empty:
+@@ -222,13 +234,13 @@ elif page == '方法与数据质量':
+         cols[3].metric('最新交易日', str(e.get('max_date', latest.date())))
+         st.caption(f"Snapshot generated UTC: {quality.get('generated_utc','?')}")
+     if spy is None:
+-        st.warning('尚无SPY历史。请先运行 REFRESH_ETF_AND_SPY.bat 生成 data/spy_prices.csv.gz。')
++        st.warning('尚无SPY历史。请检查云端更新日志及 data/spy_prices.csv.gz。')
+     else:
+         st.success(f'SPY ETF EOD history {len(spy):,} bars: '
+                    f'{spy.index.min().date()} to {spy.index.max().date()}')
+     st.dataframe(snapshot[['etf','date','age_sessions','fresh','peer_count','partition',
+                            'rvol_20','rotation_rank']], use_container_width=True, hide_index=True)
+-    st.markdown('''1. 数据为iFinD标注CPS:2的调整价格，是否与StockCharts价格复权处理完全一致尚未核验。\n
++    st.markdown('''1. 数据供应商与前复权口径以 snapshot_manifest.json 为准；与 StockCharts、iFinD 的精确一致性未核验。\n
+ 2. `data/spy_prices.csv.gz` 必须为SPY ETF真实日线行情，与20只ETF同一复权口径。\n
+ 3. 缺失ETF或SPY的收盘日不填充、不使用未完成交易日。\n
+ 4. 不引入个股、机器学习、反转分级、历史事件胜率或自动交易。''')
+diff --git a/requirements-update.txt b/requirements-update.txt
+new file mode 100644
+index 0000000..8556d97
+--- /dev/null
++++ b/requirements-update.txt
+@@ -0,0 +1,4 @@
++pandas>=2.2,<3
++numpy>=1.26,<3
++exchange-calendars>=4.11,<5
++yfinance>=0.2.65,<2
+diff --git a/scripts/refresh_data.py b/scripts/refresh_data.py
+index a5a6415..72ee6dc 100644
+--- a/scripts/refresh_data.py
++++ b/scripts/refresh_data.py
+@@ -210,6 +210,8 @@ def publish(mapped: dict, rows: list, info: dict, cutoff: str, source_type: str,
+     existing = {}
+     if paths['snapshot_manifest.json'].exists():
+         existing = json.loads(paths['snapshot_manifest.json'].read_text(encoding='utf-8'))
++        if existing.get('source') == 'Yahoo Finance via yfinance':
++            raise RuntimeError('Public-source snapshot active; legacy CPS2 updater disabled to prevent accidental source mixing.')
+     old_dates = [existing.get('etfs',{}).get('max_date',''),
+                  existing.get('spy',{}).get('max_date','')]
+     # Check existing SPY file as well; legacy manifest may not record it.
+diff --git a/scripts/refresh_public.py b/scripts/refresh_public.py
+new file mode 100644
+index 0000000..28a5d7d
+--- /dev/null
++++ b/scripts/refresh_public.py
+@@ -0,0 +1,194 @@
++"""USERM public-source EOD updater; full-history, single-vendor adjusted snapshot.
++Yahoo access is experimental and subject to data rights. Never mix CPS2 and Yahoo.
++"""
++from __future__ import annotations
++import argparse
++import hashlib
++import json
++import os
++import shutil
++import sys
++import tempfile
++import time
++from datetime import datetime, timedelta, timezone
++from pathlib import Path
++
++import exchange_calendars as xcals
++import numpy as np
++import pandas as pd
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT))
++from scripts.refresh_data import last_safe_session
++
++DATA = ROOT / 'data'
++SOURCE = 'Yahoo Finance via yfinance'
++BUFFER = 20
++START = '2020-01-01'
++COLS = ['date', 'symbol', 'open', 'high', 'low', 'close', 'volume', 'partition']
++FILES = ['etf_prices.csv.gz', 'spy_prices.csv.gz', 'snapshot_manifest.json', 'spy_snapshot_manifest.json']
++
++
++def sha(path):
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def sessions(start, end):
++    idx = xcals.get_calendar('XNYS').sessions_in_range(pd.Timestamp(start), pd.Timestamp(end))
++    return pd.DatetimeIndex(idx).tz_localize(None).normalize()
++
++
++def normalize(raw, symbol, cutoff, old_dates):
++    """Use Adj Close / Close for all OHLC, anchored at last eligible session.
++    Yahoo close is already split-adjusted; volume remains as delivered.
++    """
++    if raw is None or raw.empty:
++        raise ValueError(f'{symbol}: empty Yahoo response')
++    names = ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
++    if set(names) - set(raw.columns):
++        raise ValueError(f'{symbol}: missing Yahoo fields {set(names)-set(raw.columns)}')
++    raw = raw[names].copy()
++    idx = pd.DatetimeIndex(raw.index)
++    # yfinance ticker.history uses exchange-local timezone for daily bars.
++    raw.index = idx.tz_localize(None).normalize()
++    target = pd.Timestamp(cutoff)
++    raw = raw.loc[(raw.index >= pd.Timestamp(START)) & (raw.index <= target)].sort_index()
++    if raw.empty or raw.index[-1] != target or raw.index.has_duplicates:
++        raise ValueError(f'{symbol}: missing target {cutoff} or duplicate bars')
++    raw = raw.apply(pd.to_numeric, errors='coerce')
++    if not np.isfinite(raw.to_numpy()).all():
++        raise ValueError(f'{symbol}: nonfinite/missing OHLCV or Adj Close')
++    if (raw[names[:5]] <= 0).any().any() or (raw.Volume < 0).any() or raw.Volume.iloc[-1] <= 0:
++        raise ValueError(f'{symbol}: invalid prices/volume')
++    if ((raw.High+1e-8 < raw[['Open','Close','Low']].max(axis=1)) | (raw.Low-1e-8 > raw[['Open','Close','High']].min(axis=1))).any():
++        raise ValueError(f'{symbol}: inconsistent OHLC')
++    missing = pd.DatetimeIndex(old_dates).difference(raw.index)
++    if len(missing):
++        raise ValueError(f'{symbol}: would lose {len(missing)} original dates, e.g. {missing[:3].tolist()}')
++    expected = sessions(raw.index[0], target)
++    if not raw.index.equals(expected):
++        raise ValueError(f'{symbol}: calendar gap or unexpected session; missing={expected.difference(raw.index)[:5].tolist()} extra={raw.index.difference(expected)[:5].tolist()}')
++    ratio = raw['Adj Close'] / raw.Close
++    factor = ratio / ratio.iloc[-1]
++    out = raw[['Open','High','Low','Close']].mul(factor, axis=0).rename(columns=str.lower)
++    out['volume'] = raw.Volume
++    out['date'] = out.index.strftime('%Y-%m-%d')
++    out['symbol'] = symbol
++    out['partition'] = np.where(out.index.year < 2026, 'TRAIN', 'OOS')
++    return out[COLS].reset_index(drop=True)
++
++
++def download(ticker, cutoff):
++    import yfinance as yf
++    end = (pd.Timestamp(cutoff) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
++    return yf.Ticker(ticker).history(start=START, end=end, interval='1d',
++        auto_adjust=False, back_adjust=False, actions=False, prepost=False,
++        repair=False, keepna=True, timeout=12, raise_errors=True)
++
++
++def fetch_one(ticker, symbol, cutoff, old_dates, fetch=download):
++    error = None
++    for attempt in range(2):
++        try:
++            return normalize(fetch(ticker, cutoff), symbol, cutoff, old_dates)
++        except Exception as exc:
++            error = exc
++            print(f'[RETRY] {ticker} attempt {attempt+1}: {exc}', flush=True)
++            if attempt == 0:
++                time.sleep(3)
++    raise RuntimeError(f'{ticker}: failed; previous snapshot retained') from error
++
++
++def overlap_audit(old, new):
++    a = old.set_index('date').close.astype(float).sort_index()
++    b = new.set_index('date').close.astype(float).sort_index()
++    common = a.index.intersection(b.index)
++    if len(common) < 2:
++        return {'common_rows': len(common)}
++    delta = (a.loc[common].pct_change() - b.loc[common].pct_change()).abs().dropna()*10000
++    return {'common_rows': len(common), 'median_abs_daily_return_diff_bp': round(float(delta.median()), 4),
++            'max_abs_daily_return_diff_bp': round(float(delta.max()), 4)}
++
++
++def refresh(data=DATA, now=None, fetch=download, force=False):
++    cutoff = last_safe_session(now, buffer_minutes=BUFFER)
++    old_etf = pd.read_csv(data/'etf_prices.csv.gz', dtype={'date':str, 'symbol':str})
++    old_spy = pd.read_csv(data/'spy_prices.csv.gz', dtype={'date':str})
++    old_meta = json.loads((data/'snapshot_manifest.json').read_text(encoding='utf-8'))
++    if cutoff < max(old_etf.date.max(), old_spy.date.max()):
++        print('[SKIP] latest safe session precedes existing snapshot; no downgrade')
++        return False
++    mapping = pd.read_csv(data/'etf_codes.csv', encoding='utf-8-sig')
++    master = pd.read_csv(data/'etfs.csv', encoding='utf-8-sig')
++    if len(mapping) != 20 or mapping.etf.nunique()!=20 or mapping.symbol.nunique()!=20 or set(mapping.etf)!=set(master.etf) or 'SPY' in set(mapping.etf):
++        raise ValueError('invalid 20 ETF mapping; SPY must remain independent')
++    if any(s.split('.')[0] != e for e,s in zip(mapping.etf,mapping.symbol)):
++        raise ValueError('ticker mapping mismatch')
++    if set(old_etf.symbol) != set(mapping.symbol):
++        raise ValueError('original snapshot and universe mismatch')
++    if not force and old_meta.get('source') == SOURCE and old_meta.get('published_last_complete_21_session')==cutoff:
++        checks = old_meta.get('sha256',{})
++        if (data/FILES[3]).exists() and all(checks.get(f)==sha(data/f) for f in FILES[:2]):
++            print(f'[SKIP] already published complete Yahoo EOD {cutoff}')
++            return False
++    print(f'[PLAN] {cutoff} | 20 ETFs + SPY | full history; no CPS2 splice', flush=True)
++    frames, audit = [], {}
++    for ticker, symbol in zip(mapping.etf,mapping.symbol):
++        old = old_etf.loc[old_etf.symbol==symbol]
++        frame = fetch_one(ticker, symbol, cutoff, pd.to_datetime(old.date), fetch)
++        frames.append(frame)
++        audit[ticker] = overlap_audit(old, frame)
++        print(f'[PASS] {ticker}: {len(frame)} bars {frame.date.min()}..{frame.date.max()}', flush=True)
++    spy = fetch_one('SPY', 'SPY.P', cutoff, pd.to_datetime(old_spy.date), fetch)[['date','close']]
++    audit['SPY'] = overlap_audit(old_spy, spy)
++    etf = pd.concat(frames, ignore_index=True).sort_values(['symbol','date'])
++    if len(etf.symbol.unique()) != 20 or etf.groupby('symbol').date.max().ne(cutoff).any() or spy.date.max()!=cutoff:
++        raise RuntimeError('21-way latest-session check failed')
++    meta = {'name':'USERM 20 ETF + SPY benchmark EOD snapshot','schema':'USERM-ETF-SPY-v1',
++        'source': SOURCE, 'source_path_type':'public network', 'generated_utc':datetime.now(timezone.utc).isoformat(),
++        'adjustment':'Yahoo split-adjusted OHLC multiplied by (Adj Close / Close) normalized to most recent eligible session; dividends included; volume as reported',
++        'rrg_benchmark':'SPY','universe':'20 target ETFs; SPY benchmark only', 'eod_buffer_minutes':BUFFER,
++        'last_safe_nyse_session':cutoff,'published_last_complete_21_session':cutoff,
++        'etfs':{'rows':len(etf),'symbols_found':20,'symbols_requested':20,'invalid_rows':0,
++            'partition_rows':{k:int(v) for k,v in etf.partition.value_counts().items()},
++            'min_date':etf.date.min(),'max_date':cutoff,'latest_by_symbol':etf.groupby('symbol').date.max().to_dict()},
++        'spy':{'symbol':'SPY.P','rows':len(spy),'invalid_rows':0,'min_date':spy.date.min(),'max_date':cutoff},
++        'overlap_audit_previous_snapshot':audit,'previous_source':old_meta.get('source'),
++        'warnings':['Vendor adjustment/volume and past signals can differ from CPS2; research use and redistribution subject to data rights.']}
++    with tempfile.TemporaryDirectory(prefix='.public_',dir=data) as temp:
++        stage = Path(temp)
++        for name, frame in zip(FILES[:2], (etf,spy)):
++            frame.to_csv(stage/name,index=False,compression={'method':'gzip','compresslevel':3,'mtime':0})
++            check = pd.read_csv(stage/name)
++            if len(check)!=len(frame) or check.isna().any().any():
++                raise RuntimeError(f'Staged {name} verification failed')
++        meta['sha256'] = {f:sha(stage/f) for f in FILES[:2]}
++        (stage/FILES[2]).write_text(json.dumps(meta,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
++        spy_meta = {'schema':'USERM-SPY-ETF-BENCHMARK-v1', 'ticker':'SPY', 'source':SOURCE,
++            'adjustment':meta['adjustment'], 'last_safe_session':cutoff, 'generated_utc':meta['generated_utc'],
++            **meta['spy'], 'sha256':meta['sha256'][FILES[1]]}
++        (stage/FILES[3]).write_text(json.dumps(spy_meta,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
++        backup = stage/'old'; backup.mkdir()
++        for name in FILES:
++            if (data/name).exists(): shutil.copy2(data/name,backup/name)
++        replaced=[]
++        try:
++            for name in FILES:
++                os.replace(stage/name,data/name); replaced.append(name)
++        except Exception:
++            for name in reversed(replaced):
++                if (backup/name).exists(): os.replace(backup/name,data/name)
++                else: (data/name).unlink(missing_ok=True)
++            raise
++    print(f'[SUCCESS] {cutoff}: {len(etf)} ETF + {len(spy)} SPY bars; all 21 valid')
++    return True
++
++
++if __name__=='__main__':
++    p=argparse.ArgumentParser(description=__doc__)
++    p.add_argument('--force',action='store_true',help='Recheck even if latest snapshot already published')
++    args=p.parse_args()
++    # Prevent accidental public redistribution through automated deployment.
++    if os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('USERM_DATA_AUTHORIZED')!='yes':
++        sys.exit('Data rights gate: set USERM_DATA_AUTHORIZED=yes only after confirming use and redistribution rights.')
++    refresh(force=args.force)
+diff --git a/scripts/verify_data.py b/scripts/verify_data.py
+index 92bdcaa..edaa40a 100644
+--- a/scripts/verify_data.py
++++ b/scripts/verify_data.py
+@@ -31,18 +31,17 @@ def verify() -> None:
+         raise RuntimeError('Some of 20 ETF tickers have older latest bars')
+     if spy.index.max()!=latest:
+         raise RuntimeError(f'SPY latest {spy.index.max().date()} != ETFs {latest.date()}')
+-    safe=pd.Timestamp(last_safe_session())
++    meta=manifest()
++    safe=pd.Timestamp(last_safe_session(buffer_minutes=int(meta.get('eod_buffer_minutes',90))))
+     if latest>safe:
+         raise RuntimeError(f'Unsafe intraday bar {latest.date()} beyond safe close {safe.date()}')
+-    meta=manifest()
+     if meta.get('rrg_benchmark')!='SPY':
+         raise RuntimeError('Manifest RRG benchmark not SPY; did you run the new refresh?')
+     if str(meta.get('published_last_complete_21_session'))!=str(latest.date()):
+         raise RuntimeError('Manifest date mismatches data date')
+     print(f'PASS: 20 ETF tickers, {len(prices):,} ETF bars, '
+           f'SPY {len(spy):,} bars, aligned EOD {latest.date()}')
+-    print('Upload four files: data/etf_prices.csv.gz, data/spy_prices.csv.gz, '
+-          'data/etf_codes.csv, data/snapshot_manifest.json')
++    print('ETF/SPY local snapshot verification complete.')
+ 
+ 
+ if __name__=='__main__':
+diff --git a/tests/test_public_refresh.py b/tests/test_public_refresh.py
+new file mode 100644
+index 0000000..a398499
+--- /dev/null
++++ b/tests/test_public_refresh.py
+@@ -0,0 +1,68 @@
++from datetime import datetime, timezone
++from pathlib import Path
++import shutil
++from unittest.mock import patch
++import numpy as np
++import pandas as pd
++import pytest
++from scripts import refresh_public as p
++
++
++def test_dst_and_early_close():
++    assert p.last_safe_session(datetime(2026,11,18,21,19,tzinfo=timezone.utc),20)=='2026-11-17'
++    assert p.last_safe_session(datetime(2026,11,18,21,20,tzinfo=timezone.utc),20)=='2026-11-18'
++    assert p.last_safe_session(datetime(2026,7,9,20,20,tzinfo=timezone.utc),20)=='2026-07-09'
++    assert p.last_safe_session(datetime(2026,11,27,18,20,tzinfo=timezone.utc),20)=='2026-11-27'
++
++
++def frame(dates):
++    n=len(dates); c=100+np.arange(n)/10
++    return pd.DataFrame({'Open':c-0.1,'High':c+1,'Low':c-1,'Close':c,
++        'Adj Close':c*np.linspace(.8,.95,n),'Volume':1000}, index=dates)
++
++
++def test_normalized_adjustment_and_cutoff():
++    dates=p.sessions('2026-11-13','2026-11-19')
++    raw=frame(dates); out=p.normalize(raw,'XLC.P','2026-11-18',dates[:-1]);
++    assert out.date.iloc[-1]=='2026-11-18'
++    assert out.close.iloc[-1]==pytest.approx(raw.Close.iloc[-2])
++    assert out.close.iloc[0]==pytest.approx(raw['Adj Close'].iloc[0]/(raw['Adj Close'].iloc[-2]/raw.Close.iloc[-2]))
++    assert out.volume.eq(1000).all() and out.partition.eq('OOS').all()
++    assert list(out)==p.COLS
++
++
++def test_missing_and_invalid_rejected():
++    dates=p.sessions('2026-11-13','2026-11-19'); raw=frame(dates)
++    with pytest.raises(ValueError,match='missing target'):
++        p.normalize(raw.iloc[:-1],'SPY.P','2026-11-19',[])
++    with pytest.raises(ValueError,match='calendar gap'):
++        p.normalize(raw.drop(dates[1]),'SPY.P','2026-11-19',[])
++    with pytest.raises(ValueError,match='would lose'):
++        p.normalize(raw.drop(dates[1]),'SPY.P','2026-11-19',dates)
++    raw.iloc[0,0]=np.nan
++    with pytest.raises(ValueError,match='nonfinite'):
++        p.normalize(raw,'SPY.P','2026-11-19',[])
++
++
++def test_end_to_end_and_failure(tmp_path):
++    for f in ('etf_prices.csv.gz','spy_prices.csv.gz','snapshot_manifest.json','etfs.csv','etf_codes.csv'):
++        shutil.copy2(p.DATA/f,tmp_path/f)
++    old=pd.read_csv(tmp_path/'etf_prices.csv.gz'); starts=old.groupby('symbol').date.min().to_dict()
++    mapping=pd.read_csv(tmp_path/'etf_codes.csv'); start={e:starts[s] for e,s in zip(mapping.etf,mapping.symbol)}; start['SPY']=pd.read_csv(tmp_path/'spy_prices.csv.gz').date.min()
++    # Exercise actual old history footprint, extending exactly one real session.
++    latest=old.date.max(); target=p.sessions(latest,pd.Timestamp(latest)+pd.Timedelta(days=7))[1]
++    close=p.xcals.get_calendar('XNYS').session_close(target).to_pydatetime()
++    from datetime import timedelta
++    now=close+timedelta(minutes=21)
++    def fake(ticker, cutoff): return frame(p.sessions(start[ticker],cutoff))
++    original={f:p.sha(tmp_path/f) for f in p.FILES if (tmp_path/f).exists()}
++    def broken(ticker,cutoff): return None if ticker=='SPY' else fake(ticker,cutoff)
++    with patch.object(p.time,'sleep'):
++        with pytest.raises(RuntimeError,match='SPY'): p.refresh(tmp_path,now,broken)
++    assert original=={f:p.sha(tmp_path/f) for f in p.FILES if (tmp_path/f).exists()}
++    assert p.refresh(tmp_path,now,fake)
++    new=pd.read_csv(tmp_path/'etf_prices.csv.gz'); spy=pd.read_csv(tmp_path/'spy_prices.csv.gz')
++    assert new.symbol.nunique()==20 and new.groupby('symbol').date.max().eq(str(target.date())).all()
++    assert spy.date.max()==str(target.date())
++    assert (tmp_path/'spy_snapshot_manifest.json').exists()
++    assert not p.refresh(tmp_path,now,broken)
