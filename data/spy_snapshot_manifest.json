@@ -1,15 +1,14 @@
 {
   "schema": "USERM-SPY-ETF-BENCHMARK-v1",
-  "symbol": "SPY.P",
   "ticker": "SPY",
-  "description": "SPDR S&P 500 ETF Trust; S&P 500 tracking ETF proxy, NOT SPX index",
-  "source": "iFinD THS_HQ",
-  "adjustment": "CPS:2",
-  "price_basis": "vendor-adjusted ETF price; not equivalent to SPX cash price index",
-  "rows": 1724,
+  "source": "Yahoo Finance via yfinance",
+  "adjustment": "Yahoo split-adjusted OHLC multiplied by (Adj Close / Close) normalized to most recent eligible session; dividends included; volume as reported",
+  "last_safe_session": "2026-11-18",
+  "generated_utc": "2026-11-19T07:03:25.915836+00:00",
+  "symbol": "SPY.P",
+  "rows": 1730,
+  "invalid_rows": 0,
   "min_date": "2020-01-02",
-  "max_date": "2026-11-10",
-  "last_safe_session": "2026-11-10",
-  "generated_utc": "2026-11-11T03:02:30.940668+00:00",
-  "user_m_app_note": "Supplemental benchmark files only; V13 app requires separate reader changes to use SPY."
+  "max_date": "2026-11-18",
+  "sha256": "2dde8637c7ce122d81c4ce7f25b0ab61e205981195edd65be37dd50b34ce10eb"
 }

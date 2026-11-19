@@ -1,54 +1,169 @@
 {
   "name": "USERM 20 ETF + SPY benchmark EOD snapshot",
   "schema": "USERM-ETF-SPY-v1",
-  "generated_utc": "2026-11-18T01:10:42.999157+00:00",
-  "source": "preexisting local CPS:2 adjusted daily files; no iFinD API calls",
-  "source_path_type": "local directory",
-  "adjustment": "CPS:2 per source; dividend / total-return comparability not independently verified",
-  "universe": "20 target ETFs; SPY is ONLY RRG benchmark, excluded from ranks",
+  "source": "Yahoo Finance via yfinance",
+  "source_path_type": "public network",
+  "generated_utc": "2026-11-19T07:03:25.915836+00:00",
+  "adjustment": "Yahoo split-adjusted OHLC multiplied by (Adj Close / Close) normalized to most recent eligible session; dividends included; volume as reported",
   "rrg_benchmark": "SPY",
-  "last_safe_nyse_session": "2026-11-17",
-  "published_last_complete_21_session": "2026-11-17",
+  "universe": "20 target ETFs; SPY benchmark only",
+  "eod_buffer_minutes": 20,
+  "last_safe_nyse_session": "2026-11-18",
+  "published_last_complete_21_session": "2026-11-18",
   "etfs": {
-    "rows": 32002,
+    "rows": 33182,
     "symbols_found": 20,
     "symbols_requested": 20,
     "invalid_rows": 0,
     "partition_rows": {
-      "TRAIN": 27582,
-      "OOS": 4420
+      "TRAIN": 28742,
+      "OOS": 4440
     },
     "min_date": "2020-01-02",
-    "max_date": "2026-11-17",
+    "max_date": "2026-11-18",
     "latest_by_symbol": {
-      "BAI.P": "2026-11-17",
-      "BOTZ.O": "2026-11-17",
-      "CIBR.O": "2026-11-17",
-      "DTCR.O": "2026-11-17",
-      "GRID.O": "2026-11-17",
-      "IGV.B": "2026-11-17",
-      "QTUM.O": "2026-11-17",
-      "SKYY.O": "2026-11-17",
-      "SMH.O": "2026-11-17",
-      "VGT.P": "2026-11-17",
-      "VNQ.P": "2026-11-17",
-      "XLB.P": "2026-11-17",
-      "XLC.P": "2026-11-17",
-      "XLE.P": "2026-11-17",
-      "XLF.P": "2026-11-17",
-      "XLI.P": "2026-11-17",
-      "XLP.P": "2026-11-17",
-      "XLU.P": "2026-11-17",
-      "XLV.P": "2026-11-17",
-      "XLY.P": "2026-11-17"
+      "BAI.P": "2026-11-18",
+      "BOTZ.O": "2026-11-18",
+      "CIBR.O": "2026-11-18",
+      "DTCR.O": "2026-11-18",
+      "GRID.O": "2026-11-18",
+      "IGV.B": "2026-11-18",
+      "QTUM.O": "2026-11-18",
+      "SKYY.O": "2026-11-18",
+      "SMH.O": "2026-11-18",
+      "VGT.P": "2026-11-18",
+      "VNQ.P": "2026-11-18",
+      "XLB.P": "2026-11-18",
+      "XLC.P": "2026-11-18",
+      "XLE.P": "2026-11-18",
+      "XLF.P": "2026-11-18",
+      "XLI.P": "2026-11-18",
+      "XLP.P": "2026-11-18",
+      "XLU.P": "2026-11-18",
+      "XLV.P": "2026-11-18",
+      "XLY.P": "2026-11-18"
     }
   },
   "spy": {
     "symbol": "SPY.P",
-    "rows": 1729,
+    "rows": 1730,
     "invalid_rows": 0,
     "min_date": "2020-01-02",
-    "max_date": "2026-11-17"
+    "max_date": "2026-11-18"
   },
-  "warnings": []
+  "overlap_audit_previous_snapshot": {
+    "BAI": {
+      "common_rows": 520,
+      "median_abs_daily_return_diff_bp": 0.0003,
+      "max_abs_daily_return_diff_bp": 0.3199
+    },
+    "BOTZ": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0005,
+      "max_abs_daily_return_diff_bp": 7.8566
+    },
+    "CIBR": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0008,
+      "max_abs_daily_return_diff_bp": 6.2866
+    },
+    "DTCR": {
+      "common_rows": 1520,
+      "median_abs_daily_return_diff_bp": 0.0005,
+      "max_abs_daily_return_diff_bp": 66.496
+    },
+    "GRID": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0009,
+      "max_abs_daily_return_diff_bp": 1.7569
+    },
+    "IGV": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0004,
+      "max_abs_daily_return_diff_bp": 0.9233
+    },
+    "QTUM": {
+      "common_rows": 569,
+      "median_abs_daily_return_diff_bp": 0.0006,
+      "max_abs_daily_return_diff_bp": 289.1984
+    },
+    "SKYY": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0003,
+      "max_abs_daily_return_diff_bp": 0.6615
+    },
+    "SMH": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0004,
+      "max_abs_daily_return_diff_bp": 113.73
+    },
+    "VGT": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0007,
+      "max_abs_daily_return_diff_bp": 0.4968
+    },
+    "VNQ": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0008,
+      "max_abs_daily_return_diff_bp": 97.2821
+    },
+    "XLB": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0009,
+      "max_abs_daily_return_diff_bp": 0.6514
+    },
+    "XLC": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0007,
+      "max_abs_daily_return_diff_bp": 0.1754
+    },
+    "XLE": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0008,
+      "max_abs_daily_return_diff_bp": 0.9127
+    },
+    "XLF": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0008,
+      "max_abs_daily_return_diff_bp": 0.3002
+    },
+    "XLI": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0008,
+      "max_abs_daily_return_diff_bp": 0.0997
+    },
+    "XLP": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0009,
+      "max_abs_daily_return_diff_bp": 0.2121
+    },
+    "XLU": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0008,
+      "max_abs_daily_return_diff_bp": 0.2383
+    },
+    "XLV": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0009,
+      "max_abs_daily_return_diff_bp": 0.0557
+    },
+    "XLY": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0008,
+      "max_abs_daily_return_diff_bp": 0.532
+    },
+    "SPY": {
+      "common_rows": 1729,
+      "median_abs_daily_return_diff_bp": 0.0008,
+      "max_abs_daily_return_diff_bp": 0.5209
+    }
+  },
+  "previous_source": "preexisting local CPS:2 adjusted daily files; no iFinD API calls",
+  "warnings": [
+    "Vendor adjustment/volume and past signals can differ from CPS2; research use and redistribution subject to data rights."
+  ],
+  "sha256": {
+    "etf_prices.csv.gz": "1528afe98b25a8139c8cd93da280ed19c8f1b495c5dd3156f53ca6904cbe6fc7",
+    "spy_prices.csv.gz": "2dde8637c7ce122d81c4ce7f25b0ab61e205981195edd65be37dd50b34ce10eb"
+  }
 }
