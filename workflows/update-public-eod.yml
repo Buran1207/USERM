@@ -1,0 +1,45 @@
+name: USERM public EOD refresh
+on:
+  workflow_dispatch:
+  schedule:
+    # UTC Mon-Fri; Beijing next morning 04:23, 04:43, 05:23, 05:43, 06:23 and 07:23.
+    - cron: '23,43 20,21 * * 1-5'
+    - cron: '23 22,23 * * 1-5'
+permissions:
+  contents: write
+concurrency:
+  group: userm-public-eod-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 13
+    env:
+      USERM_DATA_AUTHORIZED: ${{ vars.USERM_DATA_AUTHORIZED }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Confirm data usage and publication rights
+        run: |
+          if [ "$USERM_DATA_AUTHORIZED" != yes ]; then
+            echo '::error::Set repository variable USERM_DATA_AUTHORIZED=yes only after verifying data rights.'
+            exit 1
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-update.txt
+      - run: python -m pip install -r requirements-update.txt
+      - run: python scripts/refresh_public.py
+      - name: Publish complete snapshot as a single Git commit
+        run: |
+          git add data/etf_prices.csv.gz data/spy_prices.csv.gz data/snapshot_manifest.json data/spy_snapshot_manifest.json
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "data: USERM verified public EOD snapshot"
+          # No force-push: a concurrent main change fails safely; next timer retries.
+          git push origin HEAD:main
