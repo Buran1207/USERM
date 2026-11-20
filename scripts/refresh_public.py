@@ -56,7 +56,7 @@ def normalize(raw, symbol, cutoff, old_dates):
     if raw.empty or raw.index[-1] != target or raw.index.has_duplicates:
         raise ValueError(f'{symbol}: missing target {cutoff} or duplicate bars')
     raw = raw.apply(pd.to_numeric, errors='coerce')
-        bad_mask = ~np.isfinite(raw.to_numpy())
+    bad_mask = ~np.isfinite(raw.to_numpy())
     if bad_mask.any():
         for i, j in np.argwhere(bad_mask):
             print(
