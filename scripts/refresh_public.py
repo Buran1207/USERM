@@ -56,8 +56,19 @@ def normalize(raw, symbol, cutoff, old_dates):
     if raw.empty or raw.index[-1] != target or raw.index.has_duplicates:
         raise ValueError(f'{symbol}: missing target {cutoff} or duplicate bars')
     raw = raw.apply(pd.to_numeric, errors='coerce')
-    if not np.isfinite(raw.to_numpy()).all():
-        raise ValueError(f'{symbol}: nonfinite/missing OHLCV or Adj Close')
+        bad_mask = ~np.isfinite(raw.to_numpy())
+    if bad_mask.any():
+        for i, j in np.argwhere(bad_mask):
+            print(
+                f'[DATA ERROR] {symbol} '
+                f'date={raw.index[i].date()} '
+                f'field={raw.columns[j]} '
+                f'value={raw.iloc[i, j]}',
+                flush=True
+            )
+        raise ValueError(
+            f'{symbol}: invalid Yahoo data'
+        )
     if (raw[names[:5]] <= 0).any().any() or (raw.Volume < 0).any() or raw.Volume.iloc[-1] <= 0:
         raise ValueError(f'{symbol}: invalid prices/volume')
     if ((raw.High+1e-8 < raw[['Open','Close','Low']].max(axis=1)) | (raw.Low-1e-8 > raw[['Open','Close','High']].min(axis=1))).any():
