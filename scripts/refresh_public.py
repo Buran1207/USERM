@@ -83,7 +83,7 @@ def download(ticker, cutoff):
     end = (pd.Timestamp(cutoff) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
     return yf.Ticker(ticker).history(start=START, end=end, interval='1d',
         auto_adjust=False, back_adjust=False, actions=False, prepost=False,
-        repair=False, keepna=True, timeout=12, raise_errors=True)
+        repair=True, keepna=True, timeout=30, raise_errors=True)
 
 
 def fetch_one(ticker, symbol, cutoff, old_dates, fetch=download):
