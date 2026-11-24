@@ -56,23 +56,45 @@ def normalize(raw, symbol, cutoff, old_dates):
     if raw.empty or raw.index[-1] != target or raw.index.has_duplicates:
         raise ValueError(f'{symbol}: missing target {cutoff} or duplicate bars')
     raw = raw.apply(pd.to_numeric, errors='coerce')
-    bad_mask = ~np.isfinite(raw.to_numpy())
-    if bad_mask.any():
-        for i, j in np.argwhere(bad_mask):
-            print(
-                f'[DATA ERROR] {symbol} '
-                f'date={raw.index[i].date()} '
-                f'field={raw.columns[j]} '
-                f'value={raw.iloc[i, j]}',
-                flush=True
-            )
-        raise ValueError(
-            f'{symbol}: invalid Yahoo data'
-        )
+    invalid = ~np.isfinite(raw.to_numpy())
+    if invalid.any():
+        for i, j in np.argwhere(invalid)[:20]:
+            print(f'[DATA-ERROR] {symbol} date={raw.index[i].date()} '
+                  f'field={raw.columns[j]} value={raw.iloc[i, j]}', flush=True)
+        raise ValueError(f'{symbol}: nonfinite/missing OHLCV or Adj Close')
     if (raw[names[:5]] <= 0).any().any() or (raw.Volume < 0).any() or raw.Volume.iloc[-1] <= 0:
         raise ValueError(f'{symbol}: invalid prices/volume')
-    if ((raw.High+1e-8 < raw[['Open','Close','Low']].max(axis=1)) | (raw.Low-1e-8 > raw[['Open','Close','High']].min(axis=1))).any():
-        raise ValueError(f'{symbol}: inconsistent OHLC')
+
+    # Yahoo/yfinance repair can return H below O/C or L above O/C.
+    # USERM's RRG and signals use close + volume, never high or low.
+    # Preserve Yahoo Open, Close, Adj Close and Volume exactly as received.
+    # Reconcile ONLY H/L bounds using the four actual Yahoo OHLC figures.
+    # This enforces the candle invariant without interpolating days or changing returns.
+    high_bound = raw[['Open', 'High', 'Low', 'Close']].max(axis=1)
+    low_bound = raw[['Open', 'High', 'Low', 'Close']].min(axis=1)
+    bad_high = raw['High'] + 1e-8 < high_bound
+    bad_low = raw['Low'] - 1e-8 > low_bound
+    affected = bad_high | bad_low
+    count_affected = int(affected.sum())
+    max_deviation_bp = 0.0
+    if count_affected:
+        deviation = pd.concat([high_bound.sub(raw['High']).clip(lower=0),
+                               raw['Low'].sub(low_bound).clip(lower=0)], axis=1).max(axis=1)
+        max_deviation_bp = float((deviation[affected] / raw.loc[affected, 'Close'] * 10000).max())
+        for dt in raw.index[affected][:12]:
+            r = raw.loc[dt]
+            print(f'[OHLC-BOUND] {symbol} {dt.date()} '
+                  f'O={r.Open:.8g} H={r.High:.8g} L={r.Low:.8g} C={r.Close:.8g} '
+                  f'corrected_H={high_bound.loc[dt]:.8g} '
+                  f'corrected_L={low_bound.loc[dt]:.8g}', flush=True)
+        print(f'[QUALITY-WARN] {symbol}: {count_affected} Yahoo H/L bounds reconciled; '
+              f'max deviation {max_deviation_bp:.4f} bp. Open/Close/Adj Close/Volume unchanged.',
+              flush=True)
+        raw.loc[bad_high, 'High'] = high_bound.loc[bad_high]
+        raw.loc[bad_low, 'Low'] = low_bound.loc[bad_low]
+        if ((raw['High'] < raw[['Open', 'Close', 'Low']].max(axis=1) - 1e-8) |
+            (raw['Low'] > raw[['Open', 'Close', 'High']].min(axis=1) + 1e-8)).any():
+            raise ValueError(f'{symbol}: OHLC bound reconciliation failed')
     missing = pd.DatetimeIndex(old_dates).difference(raw.index)
     if len(missing):
         raise ValueError(f'{symbol}: would lose {len(missing)} original dates, e.g. {missing[:3].tolist()}')
@@ -86,7 +108,11 @@ def normalize(raw, symbol, cutoff, old_dates):
     out['date'] = out.index.strftime('%Y-%m-%d')
     out['symbol'] = symbol
     out['partition'] = np.where(out.index.year < 2026, 'TRAIN', 'OOS')
-    return out[COLS].reset_index(drop=True)
+    out = out[COLS].reset_index(drop=True)
+    out.attrs['ohlc_range_reconciliations'] = {
+        'rows': count_affected, 'max_deviation_bp': round(max_deviation_bp, 4)
+    }
+    return out
 
 
 def download(ticker, cutoff):
@@ -143,14 +169,17 @@ def refresh(data=DATA, now=None, fetch=download, force=False):
             print(f'[SKIP] already published complete Yahoo EOD {cutoff}')
             return False
     print(f'[PLAN] {cutoff} | 20 ETFs + SPY | full history; no CPS2 splice', flush=True)
-    frames, audit = [], {}
+    frames, audit, ohlc_quality = [], {}, {}
     for ticker, symbol in zip(mapping.etf,mapping.symbol):
         old = old_etf.loc[old_etf.symbol==symbol]
         frame = fetch_one(ticker, symbol, cutoff, pd.to_datetime(old.date), fetch)
         frames.append(frame)
+        ohlc_quality[ticker] = frame.attrs.get('ohlc_range_reconciliations', {})
         audit[ticker] = overlap_audit(old, frame)
         print(f'[PASS] {ticker}: {len(frame)} bars {frame.date.min()}..{frame.date.max()}', flush=True)
-    spy = fetch_one('SPY', 'SPY.P', cutoff, pd.to_datetime(old_spy.date), fetch)[['date','close']]
+    spy_full = fetch_one('SPY', 'SPY.P', cutoff, pd.to_datetime(old_spy.date), fetch)
+    ohlc_quality['SPY'] = spy_full.attrs.get('ohlc_range_reconciliations', {})
+    spy = spy_full[['date','close']]
     audit['SPY'] = overlap_audit(old_spy, spy)
     etf = pd.concat(frames, ignore_index=True).sort_values(['symbol','date'])
     if len(etf.symbol.unique()) != 20 or etf.groupby('symbol').date.max().ne(cutoff).any() or spy.date.max()!=cutoff:
@@ -165,7 +194,9 @@ def refresh(data=DATA, now=None, fetch=download, force=False):
             'min_date':etf.date.min(),'max_date':cutoff,'latest_by_symbol':etf.groupby('symbol').date.max().to_dict()},
         'spy':{'symbol':'SPY.P','rows':len(spy),'invalid_rows':0,'min_date':spy.date.min(),'max_date':cutoff},
         'overlap_audit_previous_snapshot':audit,'previous_source':old_meta.get('source'),
-        'warnings':['Vendor adjustment/volume and past signals can differ from CPS2; research use and redistribution subject to data rights.']}
+        'ohlc_range_reconciliations': ohlc_quality,
+        'warnings':['Yahoo supplied some internally inconsistent High/Low bars; range bounds were reconciled from same-day Yahoo OHLC values only. Raw Open, Close, Adj Close and Volume were unchanged. Refer to ohlc_range_reconciliations for counts and maximum deviation.',
+                    'Vendor adjustment/volume and past signals can differ from CPS2; research use and redistribution subject to data rights.']}
     with tempfile.TemporaryDirectory(prefix='.public_',dir=data) as temp:
         stage = Path(temp)
         for name, frame in zip(FILES[:2], (etf,spy)):
