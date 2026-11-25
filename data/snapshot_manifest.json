@@ -3,159 +3,159 @@
   "schema": "USERM-ETF-SPY-v1",
   "source": "Yahoo Finance via yfinance",
   "source_path_type": "public network",
-  "generated_utc": "2026-11-24T02:32:41.148431+00:00",
+  "generated_utc": "2026-11-25T01:47:36.034868+00:00",
   "adjustment": "Yahoo split-adjusted OHLC multiplied by (Adj Close / Close) normalized to most recent eligible session; dividends included; volume as reported",
   "rrg_benchmark": "SPY",
   "universe": "20 target ETFs; SPY benchmark only",
   "eod_buffer_minutes": 20,
-  "last_safe_nyse_session": "2026-11-23",
-  "published_last_complete_21_session": "2026-11-23",
+  "last_safe_nyse_session": "2026-11-24",
+  "published_last_complete_21_session": "2026-11-24",
   "etfs": {
-    "rows": 33242,
+    "rows": 33262,
     "symbols_found": 20,
     "symbols_requested": 20,
     "invalid_rows": 0,
     "partition_rows": {
       "TRAIN": 28742,
-      "OOS": 4500
+      "OOS": 4520
     },
     "min_date": "2020-01-02",
-    "max_date": "2026-11-23",
+    "max_date": "2026-11-24",
     "latest_by_symbol": {
-      "BAI.P": "2026-11-23",
-      "BOTZ.O": "2026-11-23",
-      "CIBR.O": "2026-11-23",
-      "DTCR.O": "2026-11-23",
-      "GRID.O": "2026-11-23",
-      "IGV.B": "2026-11-23",
-      "QTUM.O": "2026-11-23",
-      "SKYY.O": "2026-11-23",
-      "SMH.O": "2026-11-23",
-      "VGT.P": "2026-11-23",
-      "VNQ.P": "2026-11-23",
-      "XLB.P": "2026-11-23",
-      "XLC.P": "2026-11-23",
-      "XLE.P": "2026-11-23",
-      "XLF.P": "2026-11-23",
-      "XLI.P": "2026-11-23",
-      "XLP.P": "2026-11-23",
-      "XLU.P": "2026-11-23",
-      "XLV.P": "2026-11-23",
-      "XLY.P": "2026-11-23"
+      "BAI.P": "2026-11-24",
+      "BOTZ.O": "2026-11-24",
+      "CIBR.O": "2026-11-24",
+      "DTCR.O": "2026-11-24",
+      "GRID.O": "2026-11-24",
+      "IGV.B": "2026-11-24",
+      "QTUM.O": "2026-11-24",
+      "SKYY.O": "2026-11-24",
+      "SMH.O": "2026-11-24",
+      "VGT.P": "2026-11-24",
+      "VNQ.P": "2026-11-24",
+      "XLB.P": "2026-11-24",
+      "XLC.P": "2026-11-24",
+      "XLE.P": "2026-11-24",
+      "XLF.P": "2026-11-24",
+      "XLI.P": "2026-11-24",
+      "XLP.P": "2026-11-24",
+      "XLU.P": "2026-11-24",
+      "XLV.P": "2026-11-24",
+      "XLY.P": "2026-11-24"
     }
   },
   "spy": {
     "symbol": "SPY.P",
-    "rows": 1733,
+    "rows": 1734,
     "invalid_rows": 0,
     "min_date": "2020-01-02",
-    "max_date": "2026-11-23"
+    "max_date": "2026-11-24"
   },
   "overlap_audit_previous_snapshot": {
     "BAI": {
-      "common_rows": 523,
+      "common_rows": 524,
       "median_abs_daily_return_diff_bp": 0.0,
-      "max_abs_daily_return_diff_bp": 342.8911
+      "max_abs_daily_return_diff_bp": 0.0758
     },
     "BOTZ": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.0007,
-      "max_abs_daily_return_diff_bp": 55.1724
+      "max_abs_daily_return_diff_bp": 0.0049
     },
     "CIBR": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.001,
-      "max_abs_daily_return_diff_bp": 161.8929
+      "max_abs_daily_return_diff_bp": 0.0096
     },
     "DTCR": {
-      "common_rows": 1523,
-      "median_abs_daily_return_diff_bp": 0.0007,
-      "max_abs_daily_return_diff_bp": 8.7087
+      "common_rows": 1524,
+      "median_abs_daily_return_diff_bp": 0.0,
+      "max_abs_daily_return_diff_bp": 0.0066
     },
     "GRID": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.0009,
-      "max_abs_daily_return_diff_bp": 0.0072
+      "max_abs_daily_return_diff_bp": 0.0066
     },
     "IGV": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.0,
-      "max_abs_daily_return_diff_bp": 77.0027
+      "max_abs_daily_return_diff_bp": 0.003
     },
     "QTUM": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.0009,
-      "max_abs_daily_return_diff_bp": 286.9852
+      "max_abs_daily_return_diff_bp": 0.0096
     },
     "SKYY": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.0,
-      "max_abs_daily_return_diff_bp": 96.0933
+      "max_abs_daily_return_diff_bp": 0.0054
     },
     "SMH": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.0,
-      "max_abs_daily_return_diff_bp": 236.6564
+      "max_abs_daily_return_diff_bp": 0.0035
     },
     "VGT": {
-      "common_rows": 1732,
-      "median_abs_daily_return_diff_bp": 0.0009,
-      "max_abs_daily_return_diff_bp": 181.1125
+      "common_rows": 1733,
+      "median_abs_daily_return_diff_bp": 0.001,
+      "max_abs_daily_return_diff_bp": 0.0087
     },
     "VNQ": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.001,
-      "max_abs_daily_return_diff_bp": 47.0742
+      "max_abs_daily_return_diff_bp": 0.0081
     },
     "XLB": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.001,
-      "max_abs_daily_return_diff_bp": 133.5491
+      "max_abs_daily_return_diff_bp": 0.0091
     },
     "XLC": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.001,
-      "max_abs_daily_return_diff_bp": 105.0994
+      "max_abs_daily_return_diff_bp": 0.0094
     },
     "XLE": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.001,
-      "max_abs_daily_return_diff_bp": 64.0502
+      "max_abs_daily_return_diff_bp": 0.0078
     },
     "XLF": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.001,
-      "max_abs_daily_return_diff_bp": 57.5747
+      "max_abs_daily_return_diff_bp": 0.0088
     },
     "XLI": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.001,
-      "max_abs_daily_return_diff_bp": 101.0167
+      "max_abs_daily_return_diff_bp": 0.0086
     },
     "XLP": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.0011,
-      "max_abs_daily_return_diff_bp": 6.677
+      "max_abs_daily_return_diff_bp": 0.0069
     },
     "XLU": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.001,
-      "max_abs_daily_return_diff_bp": 27.9008
+      "max_abs_daily_return_diff_bp": 0.0075
     },
     "XLV": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.0011,
-      "max_abs_daily_return_diff_bp": 14.6509
+      "max_abs_daily_return_diff_bp": 0.0071
     },
     "XLY": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.0009,
-      "max_abs_daily_return_diff_bp": 132.8962
+      "max_abs_daily_return_diff_bp": 0.0085
     },
     "SPY": {
-      "common_rows": 1732,
+      "common_rows": 1733,
       "median_abs_daily_return_diff_bp": 0.001,
-      "max_abs_daily_return_diff_bp": 107.2821
+      "max_abs_daily_return_diff_bp": 0.0086
     }
   },
   "previous_source": "Yahoo Finance via yfinance",
@@ -250,7 +250,7 @@
     "Vendor adjustment/volume and past signals can differ from CPS2; research use and redistribution subject to data rights."
   ],
   "sha256": {
-    "etf_prices.csv.gz": "de2b9ac5a31d0bc5dc1c566c9c950bf434b4f6c42c2d011ed62da67fc7edf7cf",
-    "spy_prices.csv.gz": "a1c927502c87ef8f2c7a85b1e9d1cbbad25947ec412157cd81385f0bcab554c0"
+    "etf_prices.csv.gz": "1b84ece0424d8ca4e9cf9cbc04227154a10fb85ff4944bd8d7cf3f9a2e478251",
+    "spy_prices.csv.gz": "8dbfd1cdbe52ea8c82ddd45289db2450d24052f6ea7947b31973836ac3052e9b"
   }
 }
