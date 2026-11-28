@@ -3,12 +3,12 @@
   "ticker": "SPY",
   "source": "Yahoo Finance via yfinance",
   "adjustment": "Yahoo split-adjusted OHLC multiplied by (Adj Close / Close) normalized to most recent eligible session; dividends included; volume as reported",
-  "last_safe_session": "2026-11-25",
-  "generated_utc": "2026-11-26T01:39:02.230888+00:00",
+  "last_safe_session": "2026-11-27",
+  "generated_utc": "2026-11-28T02:37:11.509854+00:00",
   "symbol": "SPY.P",
-  "rows": 1735,
+  "rows": 1736,
   "invalid_rows": 0,
   "min_date": "2020-01-02",
-  "max_date": "2026-11-25",
-  "sha256": "ebc52ea163b5dd2944a3f9645d9a443a4eb074333a96f2fc1f9e2032861e7ff8"
+  "max_date": "2026-11-27",
+  "sha256": "198c63c2feb02853489ed847e8e643c64d87f18d0e30f7e13f99088cf6901c86"
 }
